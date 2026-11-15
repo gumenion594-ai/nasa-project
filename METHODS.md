@@ -249,6 +249,37 @@ follows the selected result while open.
 New equipment: add an entry to `ITEMS` in `catalog.js` and a gap (or a line in an existing one) in `plan.js`
 that names it.
 
+### Find sites by criteria (Moon and Mars)
+
+**Find sites** (top bar of the Moon and Mars maps) searches the whole surface for areas that meet a set of
+criteria, instead of clicking one (`src/sitefinder.js`, dialog `src/finderDialog.js`). Each characteristic of
+the map, and latitude, can get limits (min / max in its own units, either end open), a preference (lower or
+higher is better) and an importance (×0.5–×3). Presets fill in a starting set:
+
+- Mars: *Safe landing* (within 30° of the equator, elevation ≤ −1 km, slope ≤ 3°, relief ≤ 100 m, thermal
+  inertia ≥ 150, i.e. not deep dust), *Water ice within reach* (ice signal ≥ 50% as in the analog search,
+  outside the polar caps, slope ≤ 5°, below the mean surface level), *Warm and sunny*, *Iron-rich ground*.
+- Moon: *South pole sunlight* (south of 80° S, where Artemis landings are planned), *Smooth mare plain*
+  (slope ≤ 2°, relief ≤ 50 m, iron ≥ 12%), *Coldest polar ground*.
+
+The presets are written for this app in the spirit of real landing-site criteria (low, flat, equatorial, not
+dusty for Mars landers); their numbers are starting points, not any mission's requirements.
+
+How it works: the same data as *Similar spots* (every layer's tiles at zoom level 1, ~21 km pixels on Mars,
+~11 km on the Moon, averaged over a circle of the selected radius around every pixel).
+1. **Limits** filter: an area passes only if every limited value is inside its limits and has data. The
+   results say what share of the surface passes; when nothing does, which limit rules out the most.
+2. **Preferences** rank the passing areas: each is scaled from the worst to the best value among them, and
+   the importance-weighted mean is the area's *fit* (100% = the best on every preference). With no
+   preference, areas are ranked by how comfortably they meet the limits (a fifth of the world's 5th–95th
+   percentile spread from the nearest limit, or more, counts fully); this also breaks ties.
+3. The best areas at least 300 km apart are shown (1–10, default 5). Each result shows its values against
+   the criteria, and leads to **Find Earth analogs** (and from there to Simulation Planning) or **Select this
+   site** (area summary, similar spots, 3D views).
+
+Example (safe-landing preset, 10 km radius): 8.7% of Mars passes every limit; the best area is at 10° N, 162° E
+in Elysium Planitia, a smooth equatorial lowland plain (InSight landed in the same plain, at 4.5° N, 135.6° E).
+
 ### Mars and Moon equivalents of an Earth place (the reverse search)
 
 `src/equivalents.js`. On the Earth map, select an area and press **🪐 Find the Mars & Moon

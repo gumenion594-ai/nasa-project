@@ -24,14 +24,14 @@ export const DEFAULT_COUNT = 3;
 export const MAX_COUNT = 10;
 
 const BASE = `${import.meta.env.BASE_URL}overlays`;
-const Z = 1;                 // tile level used for the search
-const W = 512 * 2 ** Z;      // world width in pixels (equirectangular, 2:1)
-const H = 256 * 2 ** Z;
-const RES = 360 / W;         // degrees per pixel
+export const Z = 1;                 // tile level used for the search
+export const W = 512 * 2 ** Z;      // world width in pixels (equirectangular, 2:1)
+export const H = 256 * 2 ** Z;
+export const RES = 360 / W;         // degrees per pixel
 const rad = (d) => (d * Math.PI) / 180;
-const rowLat = (r) => 90 - (r + 0.5) * RES;
-const colLon = (c) => -180 + (c + 0.5) * RES;
-const COS_ROW = Float64Array.from({ length: H }, (_, r) => Math.cos(rad(rowLat(r))));
+export const rowLat = (r) => 90 - (r + 0.5) * RES;
+export const colLon = (c) => -180 + (c + 0.5) * RES;
+export const COS_ROW = Float64Array.from({ length: H }, (_, r) => Math.cos(rad(rowLat(r))));
 const SIN_ROW = Float64Array.from({ length: H }, (_, r) => Math.sin(rad(rowLat(r))));
 
 /** Search grid cell size in km, for a world of radius `sphereKm`. */
@@ -50,7 +50,7 @@ canvas.width = canvas.height = 256;
 const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
 const grids = new Map(); // `${body}/${layer}` -> Promise<Float32Array>
-function layerGrid(body, layer, meta) {
+export function layerGrid(body, layer, meta) {
   const key = `${body}/${layer}`;
   if (!grids.has(key)) {
     const p = (async () => {
@@ -94,7 +94,7 @@ function layerGrid(body, layer, meta) {
 
 // For a centre in row `row`: for each row offset d in -n..n, how many columns either side
 // lie within the circle (-1 = none, >= W/2 = the whole row).
-function circleShape(angle) {
+export function circleShape(angle) {
   const n = Math.ceil(angle / rad(RES));
   const cosA = Math.cos(angle);
   const cache = new Map();
@@ -119,7 +119,7 @@ function circleShape(angle) {
  * Mean of `grid` over a circle around every pixel; NaN where less than half of the circle
  * has data. Uses per-row running sums, so each circle costs one step per row it spans.
  */
-function circleMeans(grid, shapeOf) {
+export function circleMeans(grid, shapeOf) {
   const sum = new Float64Array(W + 1);
   const cnt = new Float64Array(W + 1);
   // running sums of every row, computed once
@@ -172,7 +172,7 @@ function circleMeans(grid, shapeOf) {
 }
 
 // Value below which a share q of the world's area lies (histogram over 0..1 codes)
-function areaQuantiles(values, qs) {
+export function areaQuantiles(values, qs) {
   const BINS = 2048;
   const hist = new Float64Array(BINS);
   let total = 0;

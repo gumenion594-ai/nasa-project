@@ -55,6 +55,7 @@
         <button id="back" class="map-btn">&larr; Home</button>
         <button id="menu-btn" class="map-btn" aria-expanded="false" aria-controls="menu" hidden>&#9776; View</button>
         <button id="ruler-btn" class="map-btn ruler-btn" aria-pressed="false" title="Measure distance"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="2.5" y="8" width="19" height="8" rx="1.5" transform="rotate(-35 12 12)"/><path d="M7.3 9.9l1.2 1.7M10 8l1.8 2.6M12.6 6.2l1.2 1.7M15.3 4.3l1.8 2.6" transform="translate(-1.2 3.2)"/></g></svg><span class="btn-label">Ruler</span></button>
+        <button id="finder-btn" class="map-btn ruler-btn finder-btn" title="Find landing sites by criteria" hidden><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.3 15.3L21 21" stroke-linecap="round"/><path d="M10.5 6.8v7.4M6.8 10.5h7.4" stroke-width="1.2"/></g></svg><span class="btn-label">Find sites</span></button>
         <button id="help-btn" class="map-btn help-btn" title="Tutorial" aria-label="Show the tutorial">?</button>
         <button id="btn-3d" class="map-btn" aria-pressed="false" hidden>⛰ 3D terrain</button>
       </div>
@@ -338,6 +339,36 @@
         <div class="w-actions">
           <button type="button" class="w-cancel">Cancel</button>
           <button type="button" class="w-go primary"></button>
+        </div>
+      </footer>
+    </dialog>
+
+    <!-- 'Find sites' on the Moon / Mars: criteria for a whole-world search (src/finderDialog.js) -->
+    <dialog id="finder" class="weights finder" aria-labelledby="f-heading">
+      <header>
+        <h2 id="f-heading">Find sites by criteria</h2>
+        <p class="w-subheading f-sub"></p>
+        <p class="w-help">Searches the whole surface for areas that meet all your limits, then ranks them by your
+          preferences (with none, by how comfortably they meet the limits). Start from a preset or set your own: tick a
+          characteristic, give it a range (either end can be left open) and/or say whether lower or higher is better.
+          Importance sets how much a preference counts in the ranking.</p>
+      </header>
+      <div class="f-preset-box">
+        <span class="f-p-label">Presets</span>
+        <div class="f-presets w-mode-buttons" role="group" aria-label="Presets"></div>
+        <p class="f-preset-help w-mode-help"></p>
+      </div>
+      <div class="w-count">
+        <label for="f-count">Number of sites to find</label>
+        <input id="f-count" type="number" step="1" inputmode="numeric">
+      </div>
+      <div class="f-list"></div>
+      <p class="f-warning w-warning" role="alert" hidden></p>
+      <footer>
+        <div class="w-presets"><button type="button" class="f-clear">Clear all</button></div>
+        <div class="w-actions">
+          <button type="button" class="f-cancel">Cancel</button>
+          <button type="button" class="f-go primary">Find sites →</button>
         </div>
       </footer>
     </dialog>

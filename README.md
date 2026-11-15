@@ -408,7 +408,8 @@ would need its own 16-bit elevation tiles (the current ones are 8-bit, 2.6 km).
 ## Data and methods
 
 - [METHODS.md](METHODS.md): how every map layer, the analog search, its report card and validation, simulation
-  planning (equipment, cost and team to recreate a site's environment at an analog), similar spots, the 3D views and the thermal models work, and how to rebuild the data.
+  planning (equipment, cost and team to recreate a site's environment at an analog), finding sites by
+  criteria (landing-site presets), similar spots, the 3D views and the thermal models work, and how to rebuild the data.
 - [DATA_SOURCES.md](DATA_SOURCES.md): every NASA and partner data set, with dataset IDs.
 
 ## Credits
