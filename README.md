@@ -241,6 +241,103 @@ once A and B are set). What differs:
   (25° design limit; time at ~8 km/h, the Apollo 15–17 average; 92 km battery range). Routes
   longer than Apollo 17's 35.9 km, the farthest NASA has driven on the Moon, get a warning.
 
+### Efficient route: the precise route engine
+
+(Mars and the Moon. Moon: `python3 tools/build_route_grids.py --body moon` packs LRO LOLA's
+`ldem_16.img` (16 px/deg, ~1.9 km; 0.5 m steps) into `public/route/moon/grid/` (L0 4 px/deg, L1
+16 px/deg); the engine then works the same with the Moon's radius, and its dust / rock / cold
+factors use the ends of the Moon's own ranges: thermal inertia below ~34 or above ~50 TIU, nights
+below −200 °C. Without the grids the Efficient route is an estimate from the map tiles, and says so.)
+
+`src/route/engine/` implements docs/route-algorithm.md: a drivable / walkable, energy-efficient
+route from NASA's **precise MOLA elevation** (16-bit, 1 m steps; the map's 8-bit tiles are never
+used for its climbs). In the planner it's the **Efficient** route; Safest and Shortest still come
+from the map tiles.
+
+- **Modes**: a rover route is searched first (max slope 20°, setting 10–30°), then on foot (15°,
+  10–25°); if neither exists: **"Path unavailable"**, with the steepest unavoidable stretch (⛔ on
+  the map). A step is impossible if the slope along it, the sideways slope, or the steepest slope
+  inside either cell is over the limit.
+- **Cost** (km of flat driving): `d · m_cell + k_up · climb + k_down · descent`, k_up 8 (rover) /
+  10 (on foot), settings 3 / 8 / 20; `m_cell = 1 + min(0.25, w_dust f_dust + w_rock f_rock +
+  w_cold f_cold)` from the "Dusty or rocky terrain" and "Min. temperature" layers, weights 0–2,
+  so they can never make a route more than 25% more expensive. A* with an admissible heuristic
+  (great-circle distance + k_up × the unavoidable climb to B), 16 neighbours.
+- **Coarse to fine**: L0 (~7.4 km) on the A–B box + 30% (≥ 300 km), 3 distinct corridors (best,
+  then penalise its surroundings ×3 and search again, twice) → L1 (~1.85 km) in ±30 km bands
+  (best 2) → L2 (~463 m) in ±8 km bands where built. Long corridors are refined in ~300 km pieces,
+  each in its own small window. A corridor impassable at the finer level is dropped (band ×2 once
+  first). Stops early when a level changes the cost < 1% and moves the route < 1 cell.
+- **Smoothing**: string-pulling (each straight piece re-checked every half cell), then a
+  Catmull-Rom curve kept only if it also passes the limits.
+- **Web Worker** (`route.worker.js`), cancelled when A, B or settings change; progress in the panel.
+- **Output** (`findRoute` in engine.js): `{ status, mode, points: [[lat, lon, elev_m]], bounds,
+  totals: { length_km, straight_km, climb_m, descent_m, max_slope_deg, energy_km_equiv,
+  extra_cost_from_secondary_pct }, segments, blocked, levels }`.
+- **Data**: `python3 tools/build_route_grids.py` packs MOLA MEGDR 32 px/deg (`megt90n000fb.img`,
+  132 MB, downloaded if missing) into lossless WebP blocks in `public/route/grid/` (R,G = elevation
+  m + 10000; B = steepest slope inside the cell in 0.25° steps from the next finer level).
+  `--l2 south,north,west,east` adds L2 (128 px/deg) for an area. Without these blocks the
+  Efficient route falls back to an estimate from the map tiles, and says so.
+- **Tests**: `npm test` (Node's test runner): synthetic terrain (flat, wall with a gap, hill with
+  high / zero climbing penalty, closed wall, A* = Dijkstra, the 25% cap, coarse-to-fine bands,
+  output contract) and, if `data/raw/megt90n000fb.img` is present, real terrain (Jezero rim,
+  Valles Marineris, Gale → Jezero).
+
+### Zoom to route
+
+`src/route/zoom.js`. As soon as a route is found, the map zooms and pans so the whole route
+(A, B and every point between) fills the part of the screen the panels leave free; **⤢ Zoom to
+route** in the planner brings it back after you've moved the map.
+
+- **Free area from the real panels**: every visible panel (planner, selection, area summary, View,
+  legend, top buttons, zoom bar, Earth switch, landmarks switch, zoom readout) is measured on
+  screen and pushes the free area in from the side that costs the least map; then at least 40 px
+  on every side, plus room for the A / B pins. On phones that's the bottom panel's real height.
+- **Every projection**: route points (plus a 5 km ring around A and B) are projected to map
+  pixels with the map's own CRS, and the zoom and centre come from that pixel box, so it works the
+  same in equirectangular, Mercator and both polar views (where a lat/lon box would fail near the
+  pole). Cylindrical maps use the short way round at 180°.
+- **Limits**: never closer than the map's maximum zoom (~1 km across), and at least ~5 km kept in
+  view around A and B, so very short routes still show their surroundings; very long routes zoom
+  out as far as needed (down to the whole map). Animation 0.7 s (`map.flyTo`).
+- **180° on the flat maps**: the flat maps end at 180° and don't repeat, so a route crossing it is
+  drawn in two pieces at opposite edges. The view frames the piece at the west edge (clear of the
+  planner panel; on phones the bigger piece) and the panel says to use a polar view (☰ View) to see
+  it in one piece.
+- **Route stands out**: a dark halo under a bright line; while a route is shown the imagery and
+  data layers are dimmed by 20% (restored when the route is cleared); A and B pins with a dark
+  ring; small arrows every ~110 px on screen show the direction of travel (redrawn on zoom).
+- The route result carries `points` (every point, A to B) and `bounds` (short-way lat/lon box).
+
+### Driving the route at an Earth analog
+
+Connects an analog to exploration: the same traveller drives the same route at the Moon / Mars
+site and at an Earth analog, compared side by side (`src/route/compare.js`).
+
+- **From a route**: plan a route on the Moon or Mars map, then **🌍 Find Earth analogs for this
+  route** (in the planner). The search area is the circle around the route (its midpoint, half its
+  length as the radius); the route goes along in the Earth page's address (`src`, `str`, `sss`).
+- **At a result**: **🛣 Drive the same route here** opens the planner on Earth with a route of the
+  same straight-line length and direction, centred on the analog area (turned by up to 90°, or
+  shifted, if it would cross water) and the same traveller. Drag A or B to change it, as on Mars.
+  Without a site route (an analog search started from the selected area), it compares a
+  west–east crossing of the site area with the same crossing at the analog.
+- **Side by side** (planner panel), for the chosen route kind: distance, climb, steepest slope,
+  km over 15°, average slope, roughness and terrain difficulty per km, plus one sentence, e.g.
+  *"A 20 km Apollo LRV traverse here has 41% gentler slopes than the Moon site and 46% less rough
+  ground."* Both routes come from the same planner (`computeRoutes`) on the same cell size (the
+  site's grid is built at the Earth grid's cell size, since Earth's tiles are coarser), from
+  slope data at the same ~1.9 km scale (MOLA / LOLA; ETOPO 2022 on Earth).
+- **Earth data**: elevation and slope from the Earth map's tiles (ETOPO 2022, Web Mercator, read
+  by `layerSampler`), coldest night from NASA POWER. Earth has no relief map: roughness is the
+  standard deviation of the cells' elevation in a ~9 km block, the same measure as the Moon /
+  Mars relief maps. **Not on Earth**: crater rims, loose dust / rocky ground (thermal inertia) and
+  dust storms: those hazards are simply absent from the Earth route, the panel says so, and the
+  compared difficulty uses slope and roughness only on both worlds (the site's full difficulty,
+  with craters, dust and rock, is shown separately). The precise MOLA route is Mars-only, so the
+  comparison uses the map-tile routes on both worlds.
+
 ### Rovers: who travels changes the route
 
 **Who travels** offers an astronaut on foot and NASA's five Mars rovers: **Sojourner, Spirit,

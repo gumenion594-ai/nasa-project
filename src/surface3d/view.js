@@ -701,6 +701,11 @@ export function open3D(els, { world: key, lat, lon, date: startDate, onBack, onT
     await Promise.all([1, 0, 2, 3].map(async (i) => {
       const data = await groundImage(W, lat, lon, proj0, LEVELS[i].half, sizes[i]);
       if (closed) return;
+      // imagery server unreachable (tiles come back empty): keep the plain ground colours
+      // rather than a black ground
+      let lit = 0;
+      for (let k = 0; k < data.length; k += 4 * 97) if (data[k] + data[k + 1] + data[k + 2] > 6) lit++;
+      if (lit < 0.5 * (data.length / (4 * 97))) return;
       const tex = new THREE.DataTexture(data, sizes[i], sizes[i], THREE.RGBAFormat, THREE.UnsignedByteType);
       tex.colorSpace = THREE.SRGBColorSpace;
       tex.generateMipmaps = true;
@@ -729,7 +734,8 @@ export function open3D(els, { world: key, lat, lon, date: startDate, onBack, onT
       sources.near = await loadDetail(W, lat, lon, LEVELS[1].half * 1.06, 1,
         (d, n) => status(`Loading detailed terrain around you… ${Math.round((100 * d) / n)}%`));
       if (W.imagery?.texture) status('Loading satellite images…');
-      await colourJob;
+      // don't wait forever for the imagery server: the terrain is shown either way
+      await Promise.race([colourJob, new Promise((r) => setTimeout(r, 30000))]);
       if (closed) return;
       rebuild();
       status('Loading the surrounding landscape…');

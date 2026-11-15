@@ -26,6 +26,11 @@
     <div id="loader" role="status"><span>Site is loading, please wait…</span></div>
     <main id="home" class="home">
       <canvas id="stars" class="stars" aria-hidden="true"></canvas>
+      <!-- Earth (top right): its own routes and places, and their Mars / Moon equivalents -->
+      <button id="home-earth" class="switch-world home-earth" type="button" aria-label="Earth view">
+        <img alt="" width="34" height="34" />
+        <span class="sw-text">Earth<span class="sw-long"> view</span></span>
+      </button>
       <h1>Choose a landing site</h1>
       <div class="bodies">
         <button class="body-btn" data-body="moon" aria-label="Open Moon map">
@@ -127,6 +132,12 @@
             <button id="find-similar">Find similar spots</button>
           </div>
           <button id="view-3d" class="view-3d-btn" hidden>Stand here in 3D &rarr;</button>
+          <!-- Earth: the reverse search, Earth place -> Mars / Moon spots (src/equivalents.js) -->
+          <div id="equiv" class="equiv" hidden>
+            <button id="find-equiv" class="primary" type="button">🪐 Find the Mars &amp; Moon equivalents</button>
+            <p id="equiv-status" class="sub" aria-live="polite"></p>
+            <div id="equiv-results"></div>
+          </div>
         </div>
         <div class="radius-row">
           <div class="radius-head">
@@ -156,10 +167,26 @@
           <span class="eyebrow">Who travels</span>
           <div id="route-traveller" class="traveller-grid" role="radiogroup" aria-label="Who travels"></div>
           <div id="route-rover" class="route-rover"></div>
+          <details class="route-settings">
+            <summary>Route settings <span class="sub">(efficient route)</span></summary>
+            <label class="rs-row"><span>Rover: max slope</span><input id="rs-rover" type="range" min="10" max="30" step="1"><output></output></label>
+            <label class="rs-row"><span>On foot: max slope</span><input id="rs-foot" type="range" min="10" max="25" step="1"><output></output></label>
+            <span class="eyebrow">Climbing penalty</span>
+            <div id="rs-kup" class="chips" role="radiogroup" aria-label="Climbing penalty"></div>
+            <span class="eyebrow">Small adjustments (together at most +25%)</span>
+            <label class="rs-row"><span>Deep dust</span><input id="rs-dust" type="range" min="0" max="2" step="0.5"><output></output></label>
+            <label class="rs-row"><span>Boulder fields</span><input id="rs-rock" type="range" min="0" max="2" step="0.5"><output></output></label>
+            <label class="rs-row"><span>Cold nights</span><input id="rs-cold" type="range" min="0" max="2" step="0.5"><output></output></label>
+            <p class="sub">A rover route is tried first, then on foot; if neither fits the limits: "Path unavailable".
+              Climbing penalty: climbing 1 m counts like driving this many metres on the flat.</p>
+            <button id="rs-reset" type="button">Reset to defaults</button>
+          </details>
         </div>
         <p id="route-status" class="sub route-status"></p>
+        <p id="route-precise-note" class="verdict route-precise-note" hidden></p>
         <div id="route-results" hidden>
           <div id="route-tabs" class="route-tabs"></div>
+          <div id="route-compare" class="route-compare" hidden></div>
           <p id="route-about" class="sub route-about"></p>
           <div id="route-explain" class="route-explain"></div>
           <div id="route-stats"></div>
@@ -173,10 +200,22 @@
             (rover limits and weights: src/route/rovers.js). The data is 2–300 km per pixel,
             so this compares corridors; it can't see single boulders or small cliffs.</p>
         </div>
+        <p id="route-edge-note" class="sub route-edge-note" hidden>This route crosses the 180° line, where the flat map
+          ends, so part of it appears at the opposite edge. Switch to a polar view (☰ View) to see it in one piece.</p>
         <div class="actions">
+          <button id="route-zoom" type="button" hidden title="Frame the whole route on screen">⤢ Zoom to route</button>
           <button id="route-swap" type="button">⇅ Swap A and B</button>
           <button id="route-clear" type="button">Start over</button>
         </div>
+        <!-- Earth: the Mars / Moon equivalent of this route (one button per world the page allows) -->
+        <div id="route-eq" class="route-eq" hidden>
+          <button id="route-eq-mars" type="button" class="route-analogs-btn">🔴 Find the Mars equivalent of this route</button>
+          <button id="route-eq-moon" type="button" class="route-analogs-btn">🌕 Find the Moon equivalent of this route</button>
+          <p id="route-eq-status" class="sub" aria-live="polite"></p>
+        </div>
+        <button id="route-analogs" type="button" class="route-analogs-btn" hidden
+          title="Find places on another world like this route's area, then drive the same route there">🌍 Find Earth analogs for this route</button>
+        <div id="route-equiv" class="route-equiv equiv" aria-live="polite"></div>
       </aside>
 
       <!-- Typical values of every characteristic over the selected area -->

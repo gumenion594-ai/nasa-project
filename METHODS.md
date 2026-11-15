@@ -249,6 +249,47 @@ follows the selected result while open.
 New equipment: add an entry to `ITEMS` in `catalog.js` and a gap (or a line in an existing one) in `plan.js`
 that names it.
 
+### Mars and Moon equivalents of an Earth place (the reverse search)
+
+`src/equivalents.js`. On the Earth map, select an area and press **🪐 Find the Mars & Moon
+equivalents**: the spots on Mars and on the Moon most like it, each with a % match, the nearest
+named place (e.g. "near Hellas Planitia") and a button that opens it on that world's map.
+
+- **Compared**: hottest-month maximum, coldest-month minimum, day–night swing (ground
+  temperatures), slope and relief, the characteristics both sides have; weights 2 / 1 / 1 / 2 / 2
+  as in the analog search. The Earth place uses the analog search's Earth grid (land-area means
+  over the circle); every Moon / Mars spot the "Find similar spots" circle means, same radius.
+- **Like the analog search, the other way round**: slope and relief are matched by value;
+  a temperature that exists on that world is matched by value, one beyond it (Earth's nights are
+  far warmer than Mars's) relatively: the same percentile of that world as the place has on Earth.
+  Score = weighted RMS of the differences, each divided by the world's 5–95% spread; % match =
+  (1 − score) × 100.
+- **Rain**: the Moon and Mars are bone dry, so rain beyond a desert's (250 mm a year) lowers the
+  % match of every spot alike.
+- **No close equivalent**: below 86% the panel says so and gives the nearest spot with its %.
+  Calibrated on known places: classic Mars analogs score 92–96% on Mars (Atacama 93%, Devon
+  Island 92%, Antarctic Dry Valleys 96%), deserts ~88% (Sahara, Death Valley); wet or green
+  places don't reach it (London 80%, Iceland 78%, Hawaii and the Amazon 70%).
+
+**For a route**: the route planner also works on the Earth map. Plan a route there, then
+**Find the Mars (or Moon) equivalent of this route**: the same search for the circle around the
+route (its midpoint, half its length); it then opens that world's planner with the same route
+(same straight-line length and direction, same traveller where that world has it) at the
+best-matching spot, with its % match (or "no close equivalent") and a side-by-side comparison with
+the Earth route. Earth opened from Mars offers only the Mars button, from the Moon only the Moon
+one; Earth opened from the home page (**Earth view**, top right) offers both.
+
+### Map reliability
+
+- **Moon / Mars imagery gaps**: the imagery comes from NASA Trek, which can be slow or drop tiles.
+  A bundled whole-world layer sits underneath (`public/basemap/`, made by
+  `tools/build_fallback_basemap.py` from the globe textures shaded with the 8 px/degree LOLA /
+  MOLA relief), so a missing tile shows the shaded relief instead of a black square.
+- **Earth 3D ("Stand here in 3D")**: the far landscape now comes from the AWS terrain tiles (small
+  PNGs, fast), so it appears within seconds; NASADEM (Microsoft Planetary Computer) is used for
+  the detailed rings with a 25 s limit, falling back to the AWS tiles; the satellite ground images
+  get 30 s, and if they don't arrive the ground keeps its plain colour instead of turning black.
+
 ### Similar spots
 
 **Find similar spots** (Moon or Mars, with an area selected) looks for the places on the *same* world
