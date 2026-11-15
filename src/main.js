@@ -16,6 +16,8 @@ import { addLandmarks } from './landmarks.js';
 import { reportCardHtml, novelty, ordinal } from './reportcard.js';
 import { loadCountries, parseCountryFilter, formatCountryFilter, filteredOut, describeFilter } from './countries.js';
 import { createSimPanel } from './simplan/panel.js';
+import { findSites, LATITUDE, MIN_SEPARATION_KM as SITE_SEPARATION_KM } from './sitefinder.js';
+import { askCriteria, criterionName, PRESETS } from './finderDialog.js';
 import { inKnownRegion, KNOWN_REGION_KM } from './knownAnalogs.js';
 import { refineResults, REFINE_BELOW_KM } from './refine.js';
 import { featuresNear, featuresHtml } from './features.js';
@@ -739,6 +741,7 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
     $('analog-banner').hidden = true;
     $('results-analogs').hidden = true;
     $('select-panel').hidden = false;
+    $('back-to-site').textContent = '← Back to this site';
   }
   function showSimilarResults() {
     const site = { ...current };
@@ -830,6 +833,106 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
       box.hidden = false;
       $('results-analogs').textContent = `Find Earth analogs for spot ${i + 1}`;
       $('results-analogs').onclick = () => findEarthAnalogs(res);
+    }
+  }
+
+  // ---- 'Find sites': search the whole world by criteria instead of clicking (src/sitefinder.js)
+  const finderWorld = key === 'mars' || key === 'moon';
+  $('finder-btn').hidden = !finderWorld;
+  $('finder-btn').onclick = async () => {
+    if (!finderWorld || !Object.keys(available).length) return;
+    const chosen = await askCriteria({ body: key, bodyName: body.name, layers: available, radiusKm, initial: finderState[key] });
+    if (!chosen) return;
+    finderState[key] = chosen;
+    showFoundSites(chosen);
+  };
+  // "Slope ≤ 3° (lower is better, ×2)"
+  const fmtCrit = (k) => (k === LATITUDE ? (v) => `${Math.round(v * 10) / 10}°`
+    : k === 'relief' ? (v) => `${Math.round(v * 1000)} m` : (v) => formatValue(available[k], v));
+  function describeLimits(k, c) {
+    const f = fmtCrit(k);
+    const lim = c.min !== undefined && c.max !== undefined ? `${f(c.min)} to ${f(c.max)}`
+      : c.min !== undefined ? `≥ ${f(c.min)}` : c.max !== undefined ? `≤ ${f(c.max)}` : '';
+    const pref = c.prefer ? `${lim ? ', ' : ''}${c.prefer === 'low' ? 'lower' : 'higher'} is better` : '';
+    return `${lim}${pref}${c.weight !== 1 ? ` (×${c.weight})` : ''}`;
+  }
+  function showFoundSites({ criteria, count, preset }) {
+    exitSimilar();
+    const r = radiusKm;
+    similarShown = true; // map clicks pause while results are shown, as for similar spots
+    $('select-panel').hidden = true;
+    $('analog-heading').textContent = `Sites on ${body.name} that meet`;
+    $('analog-source').textContent = PRESETS[key]?.find((p) => p.id === preset)?.name ?? 'Your criteria';
+    $('analog-radius').textContent = `${r} km radius (set with the radius slider) · at least ${SITE_SEPARATION_KM} km apart`;
+    $('analog-weights').textContent = Object.entries(criteria).map(([k, c]) => `${criterionName(k)} ${describeLimits(k, c)}`).join(' · ');
+    $('analog-results').replaceChildren();
+    $('analog-compare').hidden = true;
+    $('analog-status').textContent = 'Searching…';
+    $('analog-banner').hidden = false;
+    $('back-to-site').textContent = 'Change criteria';
+    $('back-to-site').onclick = () => $('finder-btn').click();
+    $('exit-results').onclick = exitSimilar;
+    $('results-analogs').hidden = true;
+    const thisMap = map;
+    const still = () => map === thisMap && similarShown;
+    findSites({ body: key, sphereKm: body.radiusKm, layers: available, criteria, radiusKm: r, count,
+      onProgress: (text) => { if (still()) $('analog-status').textContent = text; } })
+      .then((found) => { if (still()) showSiteResults(found, criteria, r); })
+      .catch((err) => {
+        console.error(err);
+        if (still()) $('analog-status').textContent = 'The search failed to load its data. Please try again.';
+      });
+  }
+  function showSiteResults(found, criteria, r) {
+    const { results, used, passShare, shares, cellKm: cell } = found;
+    if (import.meta.env.DEV) console.log('sites', found);
+    const pct = (x) => (x >= 0.1 ? `${Math.round(x * 100)}%` : x >= 0.001 ? `${(x * 100).toFixed(1)}%` : x > 0 ? 'under 0.1%' : '0%');
+    // when nothing passes, say which limit rules out most of the surface
+    const strictest = used.filter((k) => criteria[k].min !== undefined || criteria[k].max !== undefined)
+      .sort((a, b) => shares[a] - shares[b])[0];
+    $('analog-status').textContent = results.length
+      ? `${pct(passShare)} of ${body.name}’s surface meets every limit. Best ${results.length === 1 ? 'site' : `${results.length} sites`}, ranked by how well they fit (~${Math.round(cell)} km detail).`
+      : `No area meets every limit.${strictest ? ` The strictest: ${criterionName(strictest)} (${pct(shares[strictest])} of the surface passes it on its own).` : ''} Try “Change criteria”.`;
+    similarGroup = L.layerGroup().addTo(map);
+    const markers = [];
+    const items = results.map((res, i) => {
+      L.polygon(circlePoints(res.lat, res.lon, r, body.radiusKm), { className: 'analog-area', interactive: false }).addTo(similarGroup);
+      const m = L.marker([res.lat, res.lon], {
+        icon: L.divIcon({ className: '', html: `<span class="analog-marker">${i + 1}</span>`, iconSize: [26, 26] }),
+        keyboard: false, title: `Site ${i + 1}`,
+      }).addTo(similarGroup);
+      m.on('click', () => pick(i));
+      markers.push(m);
+      const li = document.createElement('li');
+      li.innerHTML = '<button type="button" aria-pressed="false"><span class="num"></span><span class="where"></span><span class="sim"></span></button>';
+      li.querySelector('.num').textContent = i + 1;
+      li.querySelector('.where').textContent = formatLatLon(res.lat, res.lon);
+      li.querySelector('.sim').textContent = `${Math.round(res.fit * 100)}% fit`;
+      li.querySelector('button').onclick = () => pick(i);
+      return li;
+    });
+    $('analog-results').replaceChildren(...items);
+    if (results.length) {
+      map.flyToBounds(L.latLngBounds(results.map((p) => [p.lat, p.lon])).pad(0.3), { padding: [80, 80], duration: 0.8 });
+    }
+    function pick(i) {
+      const res = results[i];
+      items.forEach((li, j) => li.querySelector('button').setAttribute('aria-pressed', i === j));
+      markers.forEach((m, j) => m.getElement()?.firstChild?.classList.toggle('picked', i === j));
+      zoomToArea(res.lat, res.lon, r);
+      const rows = used.map((k) => `<tr><td>${criterionName(k)}</td><td>${describeLimits(k, criteria[k]) || '–'}</td>` +
+        `<td>${fmtCrit(k)(res.values[k])}</td></tr>`);
+      const box = $('analog-compare');
+      box.innerHTML = `<p class="c-title">Site ${i + 1} · ${formatLatLon(res.lat, res.lon)} · ${Math.round(res.fit * 100)}% fit</p>
+        <table><thead><tr><th></th><th>Criterion</th><th>Here</th></tr></thead><tbody>${rows.join('')}</tbody></table>
+        <p class="sub" style="margin-top:.4rem">Averages over the ${r} km area from the map data at ~${Math.round(cell)} km detail.
+        Fit: where the site stands on your preferences among all areas that meet the limits, by importance (100% = the best of them on every one); with no preferences, how comfortably it meets the limits.</p>
+        <button type="button" class="view-3d-btn finder-select">Select this site &rarr;</button>`;
+      box.querySelector('.finder-select').onclick = () => { exitSimilar(); select(res.lat, res.lon, { fit: 'always' }); };
+      box.hidden = false;
+      $('results-analogs').textContent = `Find Earth analogs for site ${i + 1}`;
+      $('results-analogs').onclick = () => findEarthAnalogs(res);
+      $('results-analogs').hidden = false;
     }
   }
 
@@ -1143,6 +1246,7 @@ const appHooks = {
   bodyName: () => 'Mars',
 };
 
+const finderState = {}; // last 'Find sites' criteria per world, for this visit
 let simPanelInstance = null; // Simulation Planning panel (src/simplan/), made when first opened
 const simPanel = () => (simPanelInstance ??= createSimPanel());
 
@@ -1150,7 +1254,8 @@ function hidePanels() {
   if (terrainView?.isOpen()) terrainView.close();
   simPanelInstance?.close();
   $('btn-3d').hidden = true;
-  for (const id of ['select-panel', 'analog-banner', 'menu', 'menu-btn', 'area-panel', 'switch-world', 'ruler-panel', 'route-panel']) $(id).hidden = true;
+  for (const id of ['select-panel', 'analog-banner', 'menu', 'menu-btn', 'area-panel', 'switch-world', 'ruler-panel', 'route-panel', 'finder-btn']) $(id).hidden = true;
+  $('back-to-site').textContent = '← Back to this site';
   mapView.classList.remove('measuring');
   $('menu-btn').setAttribute('aria-expanded', false);
   $('select-hint').hidden = false;
