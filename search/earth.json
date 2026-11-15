@@ -1,0 +1,43 @@
+{
+ "cells": 96386,
+ "res": 0.5,
+ "width": 720,
+ "height": 360,
+ "fields": [
+  "land",
+  "tmax",
+  "tmin",
+  "swing",
+  "dry",
+  "uv",
+  "alt",
+  "alt_sd",
+  "relief",
+  "logslope",
+  "clat",
+  "clon",
+  "sun",
+  "tmean",
+  "bare",
+  "dust"
+ ],
+ "scales": {
+  "land": 3.3333333333333335e-05,
+  "tmax": 0.01,
+  "tmin": 0.01,
+  "swing": 0.01,
+  "dry": 0.001,
+  "uv": 0.001,
+  "alt": 0.001,
+  "alt_sd": 0.0005,
+  "relief": 0.0002,
+  "logslope": 0.0002,
+  "clat": 1e-05,
+  "clon": 1e-05,
+  "sun": 0.01,
+  "tmean": 0.01,
+  "bare": 3.3333333333333335e-05,
+  "dust": 0.001
+ },
+ "about": "Land-area-weighted means per 0.5 degree cell; see tools/build_search_grid.py and tools/build_search_extra.py (sun, tmean, bare, dust)"
+}
