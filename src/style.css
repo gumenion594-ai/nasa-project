@@ -155,6 +155,13 @@ html, body { margin: 0; height: 100%; background: #000; color: #eee;
 .mission-popup ul { margin: 0 0 .5rem; padding-left: 1rem; }
 .mission-popup li { margin: .15rem 0; }
 .mission-popup a { color: #8ed3ff; }
+.candidate-site-marker { overflow: visible; background: transparent; border: 0; cursor: pointer; }
+.candidate-sites-compact .candidate-site-name { display: none; }
+.candidate-site-marker:focus-visible { outline: 2px solid #fff; outline-offset: 3px; border-radius: 50%; }
+.candidate-site-dot { position: absolute; inset: 0; border: 2px solid #fff; border-radius: 50%;
+  background: #ec8b35; box-shadow: 0 0 0 2px rgba(0,0,0,.8), 0 0 8px rgba(255,176,77,.9); }
+.candidate-site-name { position: absolute; left: 12px; top: -4px; color: #ffd18a; font-size: 11.5px;
+  font-weight: 700; line-height: 1.15; white-space: nowrap; text-shadow: 0 0 3px #000, 0 0 6px #000, 0 1px 2px #000; }
 
 /* ---- Switch (show landmarks) ---- */
 .switch-row { display: flex; align-items: center; gap: .6rem; cursor: pointer; font-size: .9rem; }
@@ -165,6 +172,7 @@ html, body { margin: 0; height: 100%; background: #000; color: #eee;
 .switch-row input:checked + .switch { background: #2b7bd6; }
 .switch-row input:checked + .switch::after { transform: translateX(16px); }
 .switch-row input:focus-visible + .switch { outline: 2px solid #7fd4ff; outline-offset: 2px; }
+.candidate-selection { color: #ffcf82; }
 
 /* ---- Weights dialog ---- */
 .weights { width: min(620px, calc(100% - 24px)); max-height: calc(100% - 32px); overflow-y: auto; padding: 0; border: 1px solid #444;
@@ -201,7 +209,7 @@ html, body { margin: 0; height: 100%; background: #000; color: #eee;
 }
 
 /* ---- Map settings panel (bottom left) ---- */
-.map-settings { padding: .55rem .75rem; background: rgba(10,10,14,.85); color: #eee; border: 1px solid #555;
+.map-settings { display: grid; gap: .45rem; padding: .55rem .75rem; background: rgba(10,10,14,.85); color: #eee; border: 1px solid #555;
   border-radius: 8px; font-size: .88rem; }
 
 /* ---- Radius (selection panel) ---- */
@@ -213,14 +221,18 @@ html, body { margin: 0; height: 100%; background: #000; color: #eee;
 .area-panel { top: 70px; right: 12px; bottom: auto; width: min(360px, calc(100% - 24px));
   max-height: calc(100% - 70px - 28px - 12px - var(--panel-h, 0px)); overflow-y: auto; }
 .area-panel .sub { margin-top: .15rem !important; }
+.area-scale { display: flex; align-items: center; gap: .45rem; margin-top: .45rem; color: #aaa; font-size: .68rem; }
+.area-scale-bar { flex: 1; height: 8px; border: 1px solid #555; border-radius: 4px; }
 .area-rows { display: flex; flex-direction: column; margin-top: .55rem; }
-.area-panel.collapsed .area-rows, .area-panel.collapsed .area-note, .area-panel.collapsed .sub { display: none; }
+.area-panel.collapsed .area-rows, .area-panel.collapsed .area-note, .area-panel.collapsed .sub,
+.area-panel.collapsed .area-scale { display: none; }
 .panel .area-row { display: grid; grid-template-columns: 10px 1fr auto; grid-template-rows: auto auto; gap: 0 .55rem;
   align-items: center; width: 100%; padding: .42rem .45rem; border: 0; border-radius: 6px; background: none;
   text-align: left; font-size: .86rem; color: #ddd; }
 .panel .area-row:hover { background: #22222a; }
 .panel .area-row.active { background: rgba(127,212,255,.12); }
-.area-row .swatch { grid-row: 1 / span 2; width: 10px; height: 28px; border-radius: 3px; background: #333; }
+.area-row .swatch { grid-row: 1 / span 2; width: 10px; height: 28px; border: 1px solid #555;
+  border-radius: 3px; background: #333; }
 .area-row .a-name { font-weight: 500; }
 .area-row .a-val { font-weight: 700; font-variant-numeric: tabular-nums; color: #fff; text-align: right; white-space: nowrap; }
 .area-row .a-range { grid-column: 2 / span 2; color: #8d8d96; font-size: .74rem; font-variant-numeric: tabular-nums; }

@@ -125,6 +125,7 @@
             <button id="clear-selection" class="icon-btn" aria-label="Clear selection">&times;</button>
           </div>
           <p id="select-coords" class="coords"></p>
+          <p id="select-site" class="sub candidate-selection" hidden></p>
           <p id="select-radius" class="sub"></p>
           <div class="actions">
             <button id="find-analogs" class="primary">Find Earth analogs</button>
@@ -190,9 +191,13 @@
           <button id="area-collapse" class="icon-btn" aria-expanded="true" aria-label="Collapse area summary">&minus;</button>
         </div>
         <p id="area-sub" class="sub"></p>
+        <div class="area-scale" aria-label="Area summary color scale: low is purple, high is white">
+          <span>Low</span><span id="area-scale-bar" class="area-scale-bar" aria-hidden="true"></span><span>High</span>
+        </div>
         <div id="area-rows" class="area-rows"></div>
         <p class="area-note">Typical value = median over the whole area (half is above, half below);
-          range = 10th–90th percentile. Click a row to show it on the map.</p>
+          range = 10th–90th percentile. Colors run from low (purple) to high (white) within each layer.
+          Click a row to show it on the map.</p>
       </aside>
 
       <!-- Search results: Earth analogs (on the Earth map) or similar spots (on the Moon/Mars) -->

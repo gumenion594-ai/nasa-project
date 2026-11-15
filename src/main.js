@@ -5,7 +5,7 @@ import { BODIES } from './bodies.js';
 import { circlePoints, formatLatLon } from './geo.js';
 import { createGlobe, globesReady } from './globes.js';
 import { drawStarfield } from './starfield.js';
-import { VIEWS, loadIndex, createOverlay, legendHtml, colourPos, gradientCss, retryFailedTiles } from './overlays.js';
+import { VIEWS, loadIndex, createOverlay, legendHtml, summaryColour, SUMMARY_GRADIENT_CSS, retryFailedTiles } from './overlays.js';
 import { summarize } from './areastats.js';
 import { askWeights, parseWeights, formatWeights } from './weights.js';
 import { PARAMS, WEIGHT_STEPS, DEFAULT_WEIGHTS, DEFAULT_COUNT, MAX_COUNT, MIN_SEPARATION_KM, parseAnalogWeights, siteValues, findAnalogs, displayValue,
@@ -13,6 +13,7 @@ import { PARAMS, WEIGHT_STEPS, DEFAULT_WEIGHTS, DEFAULT_COUNT, MAX_COUNT, MIN_SE
 import { findSimilar, MIN_DISTANCE_KM as SIMILAR_MIN_KM, DEFAULT_COUNT as SIMILAR_DEFAULT_COUNT,
   MAX_COUNT as SIMILAR_MAX_COUNT, cellKm } from './similar.js';
 import { addLandmarks } from './landmarks.js';
+import { addCandidateSites } from './candidates.js';
 import { addRuler, isMeasuring } from './ruler.js';
 import { maybeStartTutorial, startTour } from './tutorial.js';
 import { createRoutePlanner, routeEvents } from './route/planner.js';
@@ -403,8 +404,22 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
   // ---- Views (coloured overlays)
   map.createPane('overlay').style.zIndex = 350; // above the imagery, below the selection
   let overlay = null;
+  const mapLegend = L.control({ position: 'bottomleft' });
+  mapLegend.onAdd = () => {
+    const el = L.DomUtil.create('div', 'legend');
+    L.DomEvent.disableClickPropagation(el);
+    L.DomEvent.disableScrollPropagation(el);
+    return el;
+  };
+  let mapLegendAdded = false;
 
-  // ---- Map settings panel (bottom left): landmarks on/off
+  const selectCandidate = (site) => {
+    if (analog || similarShown || isMeasuring()) return;
+    if (planner?.isOpen()) { planner.click(L.latLng(site.lat, site.lon)); return; }
+    select(site.lat, site.lon, undefined, site.name);
+  };
+
+  // ---- Map settings panel (bottom left): landmarks and candidate sites
   const settings = L.control({ position: 'bottomleft' });
   settings.onAdd = () => {
     const el = L.DomUtil.create('div', 'map-settings');
@@ -414,6 +429,14 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
         <span class="switch" aria-hidden="true"></span>
         <span>Landmarks</span>
       </label>`;
+    if (key === 'moon') {
+      el.insertAdjacentHTML('beforeend', `
+        <label class="switch-row">
+          <input id="candidate-sites-toggle" type="checkbox" checked>
+          <span class="switch" aria-hidden="true"></span>
+          <span>Artemis III candidates (South Pole)</span>
+        </label>`);
+    }
     L.DomEvent.disableClickPropagation(el); // clicks here shouldn't select a spot on the map
     L.DomEvent.disableScrollPropagation(el);
     return el;
@@ -426,6 +449,11 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
   toggle.checked = true;
   showLandmarks(true);
   toggle.onchange = () => showLandmarks(toggle.checked);
+  if (key === 'moon') {
+    const showCandidates = addCandidateSites(map, key, selectCandidate);
+    const candidateToggle = $('candidate-sites-toggle');
+    candidateToggle.onchange = () => showCandidates(candidateToggle.checked);
+  }
 
   loadIndex().then((index) => {
     if (!map) return;
@@ -462,6 +490,7 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
     if (overlay) { overlay.remove(); overlay = null; }
     const legend = $('view-legend');
     if (!view) {
+      if (mapLegendAdded) { mapLegend.remove(); mapLegendAdded = false; }
       legend.hidden = true;
       legend.open = false;
       return;
@@ -472,6 +501,8 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
     legend.open = true;
     legend.querySelector('summary').textContent = `Colour legend: ${VIEWS[view].name}`;
     $('view-legend-content').innerHTML = legendHtml(view, meta);
+    if (!mapLegendAdded) { mapLegend.addTo(map); mapLegendAdded = true; }
+    mapLegend.getContainer().innerHTML = legendHtml(view, meta);
   }
 
   // ---- Area summary: typical value of every characteristic over the circle
@@ -480,6 +511,7 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
     const panel = $('area-panel');
     if (!current || !Object.keys(available).length) { panel.hidden = true; return; }
     panel.hidden = false;
+    $('area-scale-bar').style.background = SUMMARY_GRADIENT_CSS;
     $('area-sub').textContent = `${formatLatLon(current.lat, current.lon)} · ${radiusKm} km radius`;
     const token = ++summaryToken;
     const layers = Object.keys(VIEWS).filter((v) => available[v]);
@@ -512,10 +544,7 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
       const spread = lo === hi ? 'uniform' : `${lo} – ${formatValue(meta, res.p90)}`;
       const regional = meta.pixel_km > 2 * radiusKm ? ` · regional value (~${Math.round(meta.pixel_km)} km data)` : '';
       row.querySelector('.a-range').textContent = `range ${spread}${regional}`;
-      const t = colourPos(meta, res.median);
-      row.querySelector('.swatch').style.background = gradientCss(meta);
-      row.querySelector('.swatch').style.backgroundSize = '2000% 100%';
-      row.querySelector('.swatch').style.backgroundPosition = `${t * 100}% 0`;
+      row.querySelector('.swatch').style.backgroundColor = summaryColour(meta, res.median);
     }));
   }
   const setCollapsed = (collapsed) => {
@@ -544,12 +573,20 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
   }
 
   let zoomedIn = false; // has the current area already been zoomed to (second click)?
-  function select(lat, lon, opts) {
+  function select(lat, lon, opts, siteName = null) {
     current = { lat, lon };
     zoomedIn = false;
     $('select-hint').hidden = true;
     $('select-info').hidden = false;
-    $('select-coords').textContent = formatLatLon(lat, lon);
+    const formatApproximate = (value, positive, negative) =>
+      `${Math.abs(value).toFixed(1)}° ${value >= 0 ? positive : negative}`;
+    $('select-coords').textContent = siteName
+      ? `${formatApproximate(lat, 'N', 'S')}, ${formatApproximate(lon, 'E', 'W')}`
+      : formatLatLon(lat, lon);
+    $('select-site').hidden = !siteName;
+    $('select-site').textContent = siteName
+      ? `${siteName} · approximate region centre, not a touchdown point. No global Moon ice layer is available.`
+      : '';
     draw(opts);
     saveToUrl();
     updateSummary();
@@ -562,6 +599,7 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
     current = null;
     $('select-hint').hidden = false;
     $('select-info').hidden = true;
+    $('select-site').hidden = true;
     saveToUrl();
     updateSummary();
   }
@@ -907,7 +945,7 @@ function freeScreenPadding(gap = 24) {
     if (left) pl = Math.max(pl, left.right + gap);
     if (summary) pr = Math.max(pr, W - summary.left + gap);
     if (selectPanel) pr = Math.max(pr, W - selectPanel.left + gap);
-    // bottom-left map controls (landmarks switch, zoom readout)
+    // bottom-left map controls (landmarks switch, active layer legend, zoom readout)
     const controls = document.querySelector('#map-view .leaflet-bottom.leaflet-left')?.getBoundingClientRect();
     if (controls && controls.width > 0) pl = Math.max(pl, controls.right + gap);
   } else {

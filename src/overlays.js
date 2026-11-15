@@ -55,6 +55,7 @@ const PALETTES = {
     [0.55, [204, 158, 98]], [0.7, [163, 105, 64]], [0.85, [128, 86, 70]], [1.0, [245, 245, 245]],
   ],
 };
+const SUMMARY_PALETTE = [[0, [111, 66, 193]], [1, [255, 255, 255]]];
 const stopsFor = (meta) => PALETTES[meta?.palette] ?? PALETTES.coolwarm;
 function colourAt(t, stops = PALETTES.coolwarm) {
   for (let i = 1; i < stops.length; i++) {
@@ -71,6 +72,8 @@ function colourAt(t, stops = PALETTES.coolwarm) {
 export const gradientCss = (meta) =>
   `linear-gradient(to right, ${stopsFor(meta).map(([t, c]) => `rgb(${c}) ${t * 100}%`).join(', ')})`;
 export const GRADIENT_CSS = gradientCss(null);
+export const SUMMARY_GRADIENT_CSS =
+  `linear-gradient(to right, ${SUMMARY_PALETTE.map(([t, c]) => `rgb(${c}) ${t * 100}%`).join(', ')})`;
 
 // Tile values 1..255 cover the layer's full data range (enc_min..enc_max, linear or
 // log); 0 never occurs. decode() turns a tile value back into real units.
@@ -272,6 +275,12 @@ export function colourPos(meta, v) {
 export function position(meta, v) {
   if (meta.log) return (Math.log10(v) - Math.log10(meta.min)) / (Math.log10(meta.max) - Math.log10(meta.min));
   return (v - meta.min) / (meta.max - meta.min);
+}
+
+export function summaryColour(meta, v) {
+  const raw = position(meta, v);
+  const t = Number.isFinite(raw) ? Math.min(1, Math.max(0, raw)) : 0.5;
+  return `rgb(${colourAt(t, SUMMARY_PALETTE)})`;
 }
 
 export function legendHtml(view, meta) {

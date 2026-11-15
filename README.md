@@ -31,7 +31,8 @@ Or by hand: `npm install`, then `npm run dev`.
   Click elsewhere to move it.
 - **Area summary** (top right, appears with a selection): every characteristic's typical value
   over the whole circle - the area-weighted median - plus its 10th-90th percentile range. Rows
-  marked "regional value" use data coarser than the circle. Click a row to show that view.
+  marked "regional value" use data coarser than the circle. Its shared color scale runs from low
+  (purple) to high (white) within each layer's range. Click a row to show that view and its map legend.
   The tiles store each layer's full value range, so these are real values, not clipped to the
   colour scale.
 - **Earth view / Back to Mars (Moon) view** (top right): switch between Earth and the Moon or
@@ -57,7 +58,12 @@ Or by hand: `npm install`, then `npm run dev`.
   summary and radius, ruler, route planner once it exists, Find Earth analogs, Find similar spots). A click
   anywhere moves to the next step. It's shown once per browser, and any time from the **?** button (top left on
   the maps).
-- Bottom-left: **Landmarks** on/off (on every time a map opens). **Find Earth analogs** searches Earth for
+- Bottom-left: **Landmarks** on/off (on every time a map opens). On the Moon, a separate
+  **Artemis III candidates (South Pole)** switch shows the nine regions in NASA's latest update. Their labeled
+  markers are approximate region centres, not specific landing sites. Click one to select its
+  area to see the same data-layer summary and **Find Earth analogs** option as any map selection.
+  The current Moon data has no global ice layer, so an ice value is not available there.
+  **Find Earth analogs** searches Earth for
   the places most like the selected area (see *Earth analog search* below); **Find similar spots**
   searches the same world (see *Similar spots* below).
   The selection is kept in the address (e.g. `#/mars?lat=18.44&lon=77.45&r=10&view=slope`), so links and the
@@ -66,6 +72,10 @@ Or by hand: `npm install`, then `npm run dev`.
   NASA Trek maps), drawn to scale. Mars turns once every 30 s; the Moon 28x slower.
   Change the speed with `MARS_SECONDS_PER_TURN` in `src/main.js`. The Earth map is reached via
   **Find Earth analogs**.
+
+The Artemis III region names follow NASA's [latest published site-selection update](https://ntrs.nasa.gov/citations/20250011660).
+NASA describes each candidate as a region containing multiple possible landing sites; the map markers
+are approximate centres for exploration and should not be used as navigation coordinates.
 
 ## Mars route planner (A to B)
 
