@@ -549,7 +549,7 @@ def catalogue():
     return {
         ('mars', 'elevation'): (lambda: elevation('mars'), dict(unit='km', log=False, min=-8, max=12, palette='topo'), 4,
                                 'Height above the average surface level (MOLA, MGS).'),
-        ('moon', 'elevation'): (lambda: elevation('moon'), dict(unit='km', log=False, min=-6, max=6, palette='topo'), 3,
+        ('moon', 'elevation'): (lambda: elevation('moon'), dict(unit='km', log=False, min=-6, max=6, palette='topoBlue'), 3,
                                 'Height above the average surface level (LOLA, LRO).'),
         ('mars', 'slope'): (lambda: slope('mars'), SLOPE, 4,
                             'How steep the ground is, in degrees, between points ~1.9 km apart (MOLA).'),
@@ -564,7 +564,8 @@ def catalogue():
         ('mars', 'surface'): (mars_surface, dict(unit='TIU', log=True, min=30, max=1000, lat_min=-70, lat_max=70), 3,
                               'Thermal inertia: low = fine dust, high = rocks and bedrock (TES, MGS). '
                               '70°S–70°N; nearer the poles seasonal frost spoils the readings.'),
-        ('moon', 'surface'): (moon_surface, dict(unit='TIU', log=True, min=25, max=400, lat_min=-70, lat_max=70), 3,
+        # colour range centred on typical lunar soil (~44 TIU), so soil differences show; rocky craters are '80+'
+        ('moon', 'surface'): (moon_surface, dict(unit='TIU', log=True, min=25, max=80, lat_min=-70, lat_max=70), 3,
                               'Thermal inertia, as on Mars: low = fine dust, high = rocks and bedrock. Calculated '
                               'from Diviner (LRO) midnight temperatures with a thermal model. 70°S–70°N.'),
         # Iron: each body gets its own range. Mars only varies between ~15 and 23 %,

@@ -11,7 +11,7 @@
 // 16 neighbours per cell (the 8 around it plus knight's moves), so routes can run at
 // angles other than 0/45/90 degrees without zig-zagging.
 
-const R = 3389.5;
+let R = 3389.5; // the world's radius, km (sent with each grid)
 const rad = (d) => (d * Math.PI) / 180;
 const MOVES = [
   [-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [-1, 1], [1, -1], [1, 1],
@@ -19,7 +19,7 @@ const MOVES = [
 ];
 
 // Tobler (1993) hiking speed, km/h, on a grade dh/dx. Fitted to people walking on
-// Earth, so on Mars it's a relative measure of effort more than a real speed.
+// Earth, so on Mars and the Moon it's a relative measure of effort more than a real speed.
 const tobler = (grade) => 6 * Math.exp(-3.5 * Math.abs(grade + 0.05));
 
 class Heap {
@@ -83,9 +83,11 @@ function cellFactors(g, opts) {
     const s = Math.min(3, (g.slopeMax[i] / opts.cautionDeg) ** 2);
     const rough = Number.isNaN(g.relief[i]) ? 0
       : Math.min(1, Math.max(0, (Math.log10(Math.max(g.relief[i], 1e-4)) - lr0) / (lr1 - lr0)));
-    soft[i] = Number.isNaN(g.ti[i]) ? 0 : Math.min(1, Math.max(0, (150 - g.ti[i]) / 100));
+    // thresholds per world (planner.js WORLD_CFG): Mars TES values run ~30-1000, the Moon's ~25-60
+    const t = opts.ti;
+    soft[i] = Number.isNaN(g.ti[i]) ? 0 : Math.min(1, Math.max(0, (t.softHi - g.ti[i]) / t.softSpan));
     // high thermal inertia = rock and bedrock at the surface (sharp rocks wear wheels)
-    rocky[i] = Number.isNaN(g.ti[i]) ? 0 : Math.min(1, Math.max(0, (g.ti[i] - 600) / 900));
+    rocky[i] = Number.isNaN(g.ti[i]) ? 0 : Math.min(1, Math.max(0, (g.ti[i] - t.rockLo) / t.rockSpan));
     const storm = Math.min(1, g.storm[i] / 0.15);
     hazard[i] = 1 + w.slope * s + w.crater * g.crater[i] + w.rough * rough + w.soft * soft[i]
       + (w.rocky ?? 0) * rocky[i] + w.storm * storm;
@@ -172,6 +174,7 @@ function search(g, kind, opts, wall, f, z, start, goal) {
 
 self.onmessage = ({ data }) => {
   const { grid: g, opts, start, goal, id } = data;
+  R = g.R;
   const n = g.rows * g.cols;
   const wall = new Uint8Array(n);
   for (let i = 0; i < n; i++) wall[i] = !g.valid[i] || g.slopeMax[i] > opts.noGoDeg ? 1 : 0;

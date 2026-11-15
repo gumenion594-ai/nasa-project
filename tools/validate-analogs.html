@@ -1,0 +1,19 @@
+<!doctype html>
+<!--
+  Does the Earth analog search find known analogs? (dev only: `npm run dev`, then open
+  /tools/validate-analogs.html). For pairs of a Moon / Mars site and the Earth site that
+  researchers already use as its analog, runs the search with the default weights and reports
+  how well the best area within 250 km of the known analog ranks among all of Earth's areas.
+  The baseline is the same number for random land points.
+-->
+<html lang="en">
+<head><meta charset="utf-8"><title>Analog search validation</title>
+<style>body { font: 14px system-ui, sans-serif; background: #111; color: #eee; padding: 1rem; }
+td, th { padding: .2rem .6rem; text-align: left; } pre { white-space: pre-wrap; }</style></head>
+<body>
+<h1>Does the analog search find known analogs?</h1>
+<p id="status">Running…</p>
+<pre id="out"></pre>
+<script type="module" src="./validate-analogs.js"></script>
+</body>
+</html>

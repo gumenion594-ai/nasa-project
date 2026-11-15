@@ -614,13 +614,13 @@
       "pixel_km": 1.9,
       "max_zoom": 3,
       "format": "webp",
-      "palette": "topo"
+      "palette": "topoBlue"
     },
     "surface": {
       "unit": "TIU",
       "log": true,
       "min": 25,
-      "max": 400,
+      "max": 80,
       "lat_min": -70,
       "lat_max": 70,
       "about": "Thermal inertia, as on Mars: low = fine dust, high = rocks and bedrock. Calculated from Diviner (LRO) midnight temperatures with a thermal model. 70°S–70°N.",

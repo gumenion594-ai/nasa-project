@@ -50,6 +50,13 @@ const PALETTES = {
     [0.4, [170, 206, 84]], [0.55, [240, 205, 70]], [0.7, [236, 140, 52]], [0.84, [196, 74, 48]],
     [0.93, [150, 104, 92]], [1.0, [248, 248, 248]],
   ],
+  // Moon elevation: the same relief colours with a wider blue range, so the low maria and
+  // basins read blue and only the highlands turn green, yellow and red.
+  topoBlue: [
+    [0.0, [30, 22, 96]], [0.18, [38, 70, 176]], [0.34, [46, 130, 212]], [0.46, [92, 186, 224]],
+    [0.56, [86, 184, 140]], [0.66, [190, 210, 96]], [0.76, [240, 196, 72]], [0.86, [226, 120, 52]],
+    [0.94, [176, 70, 52]], [1.0, [248, 248, 248]],
+  ],
   terrain: [
     [0.0, [52, 128, 70]], [0.1, [104, 160, 82]], [0.25, [186, 196, 116]], [0.4, [226, 205, 140]],
     [0.55, [204, 158, 98]], [0.7, [163, 105, 64]], [0.85, [128, 86, 70]], [1.0, [245, 245, 245]],
@@ -270,6 +277,14 @@ function ticks(meta) {
 export function colourPos(meta, v) {
   const t = Math.min(1, Math.max(0, position(meta, v)));
   return meta.reverse ? 1 - t : t;
+}
+
+// Area summary swatches: one simple scale for every layer - blue = low, white = middle,
+// red = high within the layer's colour range - whatever the layer's own map palette is
+// (relief colours, reversed dryness, ...), so high and low read the same on every row.
+export function levelColour(meta, v) {
+  const t = Math.min(1, Math.max(0, position(meta, v)));
+  return `rgb(${colourAt(t, PALETTES.coolwarm).join(',')})`;
 }
 
 export function position(meta, v) {

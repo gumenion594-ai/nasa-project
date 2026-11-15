@@ -7,6 +7,8 @@
 // tier: 0 = always shown, 1 = from 2x zoom, 2 = from 4x zoom (keeps the map uncluttered)
 // Coordinates: planetocentric latitude, east longitude (-180..180).
 import L from 'leaflet';
+import { KNOWN_ANALOGS } from './knownAnalogs.js';
+import { addFeatureMarkers } from './features.js';
 
 export const LANDMARKS = {
   moon: [
@@ -17,9 +19,6 @@ export const LANDMARKS = {
     ['Apollo 15', 26.132, 3.634, 'human', 0, 'July 1971, first lunar rover'],
     ['Apollo 16', -8.973, 15.5, 'human', 0, 'April 1972, highlands'],
     ['Apollo 17', 20.191, 30.772, 'human', 0, 'December 1972, last crewed landing'],
-    // Robotic
-    ["Chang'e 4", -45.44, 177.6, 'robotic', 1, 'First far-side landing, 2019'],
-    ["Chang'e 5", 43.06, -51.92, 'robotic', 2, 'Sample return, 2020'],
     // Mountains
     ['Mons Huygens', 19.92, -2.86, 'peak', 1, 'Tallest lunar mountain, ~5.5 km above its surroundings'],
     ['Mons Hadley', 26.69, 4.12, 'peak', 2, 'Next to the Apollo 15 site'],
@@ -54,7 +53,6 @@ export const LANDMARKS = {
     ['Opportunity', -1.95, -5.53, 'robotic', 1, 'NASA rover, 2004-2018'],
     ['Phoenix', 68.22, -125.75, 'robotic', 1, '2008, found water ice'],
     ['InSight', 4.5, 135.62, 'robotic', 1, '2018, seismometer'],
-    ['Zhurong', 25.07, 109.93, 'robotic', 1, 'Chinese rover, 2021'],
     // Volcanoes
     ['Olympus Mons', 18.65, -133.8, 'peak', 0, 'Tallest volcano in the solar system, ~22 km'],
     ['Ascraeus Mons', 11.92, -104.08, 'peak', 1],
@@ -201,20 +199,6 @@ const MISSION_DETAILS = {
     intro: 'Apollo 17 explored the Taurus-Littrow valley.',
     source: 'https://www.nasa.gov/mission/apollo-17/',
   },
-  "Chang'e 4": {
-    year: 2019,
-    organization: 'China National Space Administration (CNSA)',
-    type: 'Robotic lander and rover',
-    keyFact: 'First soft landing on the lunar far side; Queqiao relayed communications to Earth.',
-    intro: 'The lander and rover reached Von Karman crater on the Moon’s far side.',
-  },
-  "Chang'e 5": {
-    year: 2020,
-    organization: 'China National Space Administration (CNSA)',
-    type: 'Robotic sample-return mission',
-    keyFact: 'Collected lunar material and returned it to Earth.',
-    intro: 'Chang’e 5 landed in Oceanus Procellarum and brought lunar samples home.',
-  },
   'Curiosity · Gale crater': {
     year: 2012,
     organization: 'NASA / Jet Propulsion Laboratory',
@@ -287,16 +271,29 @@ const MISSION_DETAILS = {
     intro: 'InSight studied Mars’s internal structure, heat flow, and seismic activity.',
     source: 'https://science.nasa.gov/mission/insight/',
   },
-  'Zhurong': {
-    year: 2021,
-    organization: 'China National Space Administration (CNSA)',
-    type: 'Robotic rover',
-    keyFact: 'First Chinese rover on Mars; landed in Utopia Planitia.',
-    intro: 'Zhurong explored the Martian plains as part of China’s Tianwen-1 mission.',
-  },
 };
 
-const ICON = { human: '◆', robotic: '●', peak: '▲', feature: '', sea: '', range: '', desert: '' };
+const ICON = { human: '◆', robotic: '●', peak: '▲', feature: '', sea: '', range: '', desert: '', analog: '✦' };
+
+// Popup of an established analog site (src/knownAnalogs.js)
+function analogPopup(a) {
+  const content = document.createElement('article');
+  content.className = 'mission-popup';
+  const heading = document.createElement('h3');
+  heading.textContent = a.name;
+  const kind = document.createElement('p');
+  kind.textContent = `Known ${a.worlds.map((w) => (w === 'moon' ? 'Moon' : 'Mars')).join(' and ')} analog`;
+  kind.className = 'analog-kind';
+  const why = document.createElement('p');
+  why.textContent = a.why + (a.approx ? ' (marker position approximate)' : '');
+  const source = document.createElement('a');
+  source.href = a.source;
+  source.target = '_blank';
+  source.rel = 'noopener noreferrer';
+  source.textContent = 'More about this site';
+  content.append(heading, kind, why, source);
+  return content;
+}
 
 function missionPopup(name, details) {
   const content = document.createElement('article');
@@ -374,6 +371,21 @@ export function addLandmarks(map, body) {
       });
     }
     tiers[tier].addLayer(marker);
+  }
+  // Earth: established Moon / Mars analog sites, clickable, from 2x zoom
+  if (body === 'earth') {
+    for (const a of KNOWN_ANALOGS) {
+      const marker = L.marker([a.lat, a.lon], {
+        icon: L.divIcon({ className: 'landmark landmark-analog landmark-mission',
+          html: `<div class="lm"><span class="lm-icon">${ICON.analog}</span><span class="lm-text"></span></div>`, iconSize: null }),
+        pane: 'labels', title: `${a.name}: known analog site`,
+      });
+      marker.on('add', () => { marker.getElement().querySelector('.lm-text').textContent = a.name; });
+      marker.bindPopup(analogPopup(a), { className: 'mission-popup-shell', minWidth: 200, maxWidth: 280, autoPanPadding: [16, 16] });
+      tiers[1].addLayer(marker);
+    }
+    // impact structures and young volcanoes (loaded in the background)
+    addFeatureMarkers(map, tiers).catch((e) => console.warn('Earth features not loaded', e));
   }
   let visible = true;
   const update = () => {

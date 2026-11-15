@@ -23,10 +23,10 @@ const fmt = (w) => (w === 0 ? 'off' : `×${w}`);
  * Show the weights dialog. `layers` are the characteristics (view keys), or `items`
  * [{ key, name, help }] for any other list; `steps` the allowed weights; `initial` any
  * saved weights. With `mode` ({ value, options: [[id, label, help]] }) a switch is shown
- * above the list. Resolves with the chosen weights (plus `mode` when used), or null if
- * cancelled.
+ * above the list. With `toggle` ({ value, label, help }) a checkbox is shown under it. Resolves
+ * with the chosen weights (plus `mode`, `count`, `toggle` when used), or null if cancelled.
  */
-export function askWeights({ heading, subheading, action, layers, items, steps = STEPS, initial = {}, mode = null, defaults = null, count = null }) {
+export function askWeights({ heading, subheading, action, layers, items, steps = STEPS, initial = {}, mode = null, defaults = null, count = null, toggle = null, countries = null }) {
   items ??= layers.map((k) => ({ key: k, name: VIEWS[k].name }));
   layers = items.map((it) => it.key);
   const dialog = document.getElementById('weights');
@@ -77,10 +77,12 @@ export function askWeights({ heading, subheading, action, layers, items, steps =
       row.classList.toggle('off', weights[k] === 0);
     }
     const badCount = count && !countOk();
-    go.disabled = total === 0 || badCount;
-    warning.hidden = total > 0 && !badCount;
+    const badCountries = countries && cMode !== 'any' && !cIds.size;
+    go.disabled = total === 0 || badCount || badCountries;
+    warning.hidden = total > 0 && !badCount && !badCountries;
     warning.textContent = total === 0 ? 'Turn on at least one characteristic to continue.'
-      : `Choose between ${count?.min} and ${count?.max} places.`;
+      : badCount ? `Choose between ${count?.min} and ${count?.max} places.`
+        : 'Choose at least one country, or switch the country filter back to “Anywhere”.';
     countBox.classList.toggle('bad', !!badCount);
   }
   // optional switch (e.g. "Match my site" / "Most extreme")
@@ -122,10 +124,65 @@ export function askWeights({ heading, subheading, action, layers, items, steps =
     countBox.querySelector('.w-count-help').textContent = `Whole number from ${count.min} to ${count.max}.`;
     countInput.oninput = () => update();
   }
+  // optional on/off option (e.g. "Only new places")
+  const toggleBox = dialog.querySelector('.w-toggle');
+  const toggleInput = toggleBox.querySelector('input');
+  toggleBox.hidden = !toggle;
+  if (toggle) {
+    toggleInput.checked = !!toggle.value;
+    toggleBox.querySelector('.w-toggle-label').textContent = toggle.label;
+    toggleBox.querySelector('.w-toggle-help').textContent = toggle.help ?? '';
+  }
+  // optional country filter: { value: { mode, ids }, list: [{ id, name }] }
+  const cBox = dialog.querySelector('.w-countries');
+  cBox.hidden = !countries;
+  let cMode = countries?.value.mode ?? 'any';
+  const cIds = new Set(countries?.value.ids ?? []);
+  let showCountries = () => {};
+  if (countries) {
+    const search = cBox.querySelector('.w-c-search');
+    const listEl = cBox.querySelector('.w-c-list');
+    const chosenEl = cBox.querySelector('.w-c-chosen');
+    const byId = new Map(countries.list.map((c) => [c.id, c.name]));
+    search.value = '';
+    const boxes = countries.list.map(({ id, name }) => {
+      const label = document.createElement('label');
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.onchange = () => { if (input.checked) cIds.add(id); else cIds.delete(id); showCountries(); update(); };
+      label.append(input, document.createTextNode(name));
+      return { id, name: name.toLowerCase(), label, input };
+    });
+    listEl.replaceChildren(...boxes.map((b) => b.label));
+    showCountries = () => {
+      cBox.querySelectorAll('.w-c-modes button').forEach((b) => b.setAttribute('aria-checked', b.dataset.mode === cMode));
+      cBox.querySelector('.w-c-pick').hidden = cMode === 'any';
+      const q = search.value.trim().toLowerCase();
+      for (const b of boxes) { b.input.checked = cIds.has(b.id); b.label.hidden = !!q && !b.name.includes(q); }
+      // chosen countries as removable chips
+      chosenEl.replaceChildren(...[...cIds].map((id) => {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'w-c-chip';
+        chip.textContent = `${byId.get(id) ?? id} ×`;
+        chip.setAttribute('aria-label', `Remove ${byId.get(id)}`);
+        chip.onclick = () => { cIds.delete(id); showCountries(); update(); };
+        return chip;
+      }));
+      if (!cIds.size) chosenEl.textContent = cMode === 'avoid' ? 'Tick the countries to leave out.' : 'Tick the countries to search in.';
+    };
+    cBox.querySelectorAll('.w-c-modes button').forEach((b) => {
+      b.onclick = () => { cMode = b.dataset.mode; showCountries(); update(); };
+    });
+    search.oninput = () => showCountries();
+    showCountries();
+  }
   reset.onclick = () => {
+    if (countries) { cMode = 'any'; cIds.clear(); showCountries(); }
     for (const k of layers) weights[k] = defaults?.[k] ?? 1;
     if (mode?.default) { modeValue = mode.default; showMode?.(); }
     if (count) countInput.value = count.default ?? count.value;
+    if (toggle) toggleInput.checked = false;
     update();
   };
   dialog.querySelector('.w-all-0').onclick = () => { for (const k of layers) weights[k] = 0; update(); };
@@ -138,7 +195,9 @@ export function askWeights({ heading, subheading, action, layers, items, steps =
       resolve(result);
     };
     go.onclick = () => finish({ ...weights, ...(mode ? { mode: modeValue } : {}),
-      ...(count ? { count: Number(countInput.value) } : {}) });
+      ...(count ? { count: Number(countInput.value) } : {}),
+      ...(toggle ? { toggle: toggleInput.checked } : {}),
+      ...(countries ? { countries: { mode: cIds.size ? cMode : 'any', ids: cMode === 'any' ? [] : [...cIds] } } : {}) });
     dialog.querySelector('.w-cancel').onclick = () => finish(null);
     dialog.onclose = () => resolve(null); // Esc key
     dialog.showModal();

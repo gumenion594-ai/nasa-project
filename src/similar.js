@@ -24,14 +24,14 @@ export const DEFAULT_COUNT = 3;
 export const MAX_COUNT = 10;
 
 const BASE = `${import.meta.env.BASE_URL}overlays`;
-const Z = 1;                 // tile level used for the search
-const W = 512 * 2 ** Z;      // world width in pixels (equirectangular, 2:1)
-const H = 256 * 2 ** Z;
-const RES = 360 / W;         // degrees per pixel
+export const Z = 1;                 // tile level used for the search
+export const W = 512 * 2 ** Z;      // world width in pixels (equirectangular, 2:1)
+export const H = 256 * 2 ** Z;
+export const RES = 360 / W;         // degrees per pixel
 const rad = (d) => (d * Math.PI) / 180;
-const rowLat = (r) => 90 - (r + 0.5) * RES;
-const colLon = (c) => -180 + (c + 0.5) * RES;
-const COS_ROW = Float64Array.from({ length: H }, (_, r) => Math.cos(rad(rowLat(r))));
+export const rowLat = (r) => 90 - (r + 0.5) * RES;
+export const colLon = (c) => -180 + (c + 0.5) * RES;
+export const COS_ROW = Float64Array.from({ length: H }, (_, r) => Math.cos(rad(rowLat(r))));
 const SIN_ROW = Float64Array.from({ length: H }, (_, r) => Math.sin(rad(rowLat(r))));
 
 /** Search grid cell size in km, for a world of radius `sphereKm`. */
@@ -50,7 +50,7 @@ canvas.width = canvas.height = 256;
 const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
 const grids = new Map(); // `${body}/${layer}` -> Promise<Float32Array>
-function layerGrid(body, layer, meta) {
+export function layerGrid(body, layer, meta) {
   const key = `${body}/${layer}`;
   if (!grids.has(key)) {
     const p = (async () => {
@@ -94,7 +94,7 @@ function layerGrid(body, layer, meta) {
 
 // For a centre in row `row`: for each row offset d in -n..n, how many columns either side
 // lie within the circle (-1 = none, >= W/2 = the whole row).
-function circleShape(angle) {
+export function circleShape(angle) {
   const n = Math.ceil(angle / rad(RES));
   const cosA = Math.cos(angle);
   const cache = new Map();
@@ -119,7 +119,7 @@ function circleShape(angle) {
  * Mean of `grid` over a circle around every pixel; NaN where less than half of the circle
  * has data. Uses per-row running sums, so each circle costs one step per row it spans.
  */
-function circleMeans(grid, shapeOf) {
+export function circleMeans(grid, shapeOf) {
   const sum = new Float64Array(W + 1);
   const cnt = new Float64Array(W + 1);
   // running sums of every row, computed once
@@ -172,7 +172,7 @@ function circleMeans(grid, shapeOf) {
 }
 
 // Value below which a share q of the world's area lies (histogram over 0..1 codes)
-function areaQuantiles(values, qs) {
+export function areaQuantiles(values, qs) {
   const BINS = 2048;
   const hist = new Float64Array(BINS);
   let total = 0;
@@ -284,4 +284,74 @@ export async function findSimilar({ body, sphereKm, layers, weights, site, radiu
     used,
     skipped,
   };
+}
+
+// ---- Earth -> Moon / Mars: the places on a world most like given target values -------------
+
+/** A value in a layer's units -> its 0..1 tile code scale (the inverse of decode). */
+function encodeT(meta, v) {
+  const lo = meta.enc_min ?? meta.min;
+  const hi = meta.enc_max ?? meta.max;
+  if (meta.log) return (Math.log10(Math.max(v, 1e-9)) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo));
+  return (v - lo) / (hi - lo);
+}
+
+/**
+ * The spots on `body` most like a place elsewhere (an Earth site), compared like with like:
+ * every spot's values are circle means of `radiusKm`, as in findSimilar.
+ *   targets: {layer: { value, pct }}: the place's value in the layer's units, and its percentile
+ *     (0..1, by area) on its own world. A value beyond anything on `body` (Earth is far warmer
+ *     than Mars at night) is matched relatively: to `body`'s value at the same percentile.
+ *     always: layers matched by value only (slope, relief).
+ * Resolves to { results: [{lat, lon, score, values}], used, targets: {layer: value}, relative: {layer: pct} }.
+ */
+export async function findMatches({ body, sphereKm, layers, weights, targets, always = [], radiusKm, count = DEFAULT_COUNT, onProgress }) {
+  const wanted = Object.keys(weights).filter((k) => weights[k] > 0 && layers[k] && targets[k] && Number.isFinite(targets[k].value));
+  onProgress?.(`Loading the ${body === 'moon' ? 'Moon' : 'Mars'} data…`);
+  const raw = await Promise.all(wanted.map((k) => layerGrid(body, k, layers[k])));
+  const shapeOf = circleShape(radiusKm / sphereKm);
+  const used = []; const means = {}; const spreads = {}; const goal = {}; const relative = {};
+  for (let i = 0; i < wanted.length; i++) {
+    const k = wanted[i];
+    onProgress?.(`Comparing every area of the ${body === 'moon' ? 'Moon' : 'Mars'}… (${i + 1}/${wanted.length})`);
+    await nextFrame();
+    const m = circleMeans(raw[i], shapeOf);
+    const [lo, p5, p95, hi] = areaQuantiles(m, [0.001, 0.05, 0.95, 0.999]);
+    const t = encodeT(layers[k], targets[k].value);
+    if (always.includes(k) || (t >= lo && t <= hi)) goal[k] = Math.min(1, Math.max(0, t));
+    else {
+      const pct = Math.min(1, Math.max(0, targets[k].pct ?? (t < lo ? 0 : 1)));
+      [goal[k]] = areaQuantiles(m, [Math.min(0.999, Math.max(0.001, pct))]);
+      relative[k] = pct;
+    }
+    used.push(k); means[k] = m; spreads[k] = Math.max(1e-3, p95 - p5);
+  }
+  if (!used.length) return { results: [], used, targets: {}, relative };
+  onProgress?.('Ranking…');
+  await nextFrame();
+  const totalW = used.reduce((a, k) => a + weights[k], 0);
+  const scores = new Float32Array(W * H).fill(Infinity);
+  for (let j = 0; j < W * H; j++) {
+    let s = 0; let ok = true;
+    for (const k of used) {
+      const v = means[k][j];
+      if (v !== v) { ok = false; break; }
+      const d = (v - goal[k]) / spreads[k];
+      s += weights[k] * d * d;
+    }
+    if (ok) scores[j] = Math.sqrt(s / totalW);
+  }
+  const order = [];
+  for (let j = 0; j < scores.length; j++) if (scores[j] !== Infinity) order.push(j);
+  order.sort((a, b) => scores[a] - scores[b]);
+  const toValue = (k, t) => decode(layers[k], 1 + t * 254);
+  const results = [];
+  for (const j of order) {
+    const lat = rowLat(Math.floor(j / W));
+    const lon = colLon(j % W);
+    if (results.some((p) => distanceKm(sphereKm, p.lat, p.lon, lat, lon) < MIN_DISTANCE_KM)) continue;
+    results.push({ lat, lon, score: scores[j], values: Object.fromEntries(used.map((k) => [k, toValue(k, means[k][j])])) });
+    if (results.length === count) break;
+  }
+  return { results, used, targets: Object.fromEntries(used.map((k) => [k, toValue(k, goal[k])])), relative };
 }

@@ -8,13 +8,16 @@
 // are blurred. The surface is drawn flat (no planet curvature) around the area's centre.
 // Heights can be exaggerated to read the shape better; the factor is always shown.
 //
+// Moon (open({ world: 'moon', planner })): the same for the Moon's route planner, from LRO LOLA
+// elevation (~1.9 km per pixel) with LRO WAC / Kaguya images.
+//
 // Earth (open({ world: 'earth', region })): an analog area from the Earth map, with heights
 // from NASA NASADEM (~30 m; polar regions: AWS Terrain Tiles) and the satellite image draped
 // on the area's tile (both loaded by src/surface3d/dem.js); the area is marked by a ring.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { loadIndex } from '../overlays.js';
-import { layerSampler, MARS_R } from '../route/grid.js';
+import { layerSampler, MARS_R, RADIUS } from '../route/grid.js';
 import { BODIES } from '../bodies.js';
 import { formatLatLon } from '../geo.js';
 // Earth (analog areas): NASADEM heights and satellite images, as in the Earth "Stand here in 3D"
@@ -31,13 +34,20 @@ const TILES = 3;               // 3 x 3 tiles: the route's tile in the middle, i
 const GRID = 3 * 256 + 1;      // vertices per side (769: ~256 per tile, the highest detail we draw)
 const FOG = '#2b1f19';         // haze colour at the horizon (matches the sky's lower edge)
 const IMG_W = 2050; // draped image width (2048 + a 1-pixel border on each side)
-const SHOWCASE = { lat: -5.4, lon: 137.8, wKm: 180, hKm: 180, name: 'Gale Crater (Curiosity)' };
+const SHOWCASE = {
+  mars: { lat: -5.4, lon: 137.8, wKm: 180, hKm: 180, name: 'Gale Crater (Curiosity)' },
+  moon: { lat: -43.3, lon: -11.2, wKm: 180, hKm: 180, name: 'Tycho crater' },
+};
 const $ = (id) => document.getElementById(id);
 const fmtM = (km) => `${Math.round(km * 1000).toLocaleString()} m`;
 
 // Elevation colours: Mars rust reds, deeper in low ground, a little lighter on high ground
 const ELEV_STOPS = [
   [0.0, [66, 22, 13]], [0.3, [104, 34, 18]], [0.55, [140, 48, 25]], [0.8, [166, 64, 34]], [1.0, [186, 84, 48]],
+];
+// Moon: dark grey lowland (maria) -> pale grey highland
+const MOON_ELEV_STOPS = [
+  [0.0, [52, 52, 54]], [0.35, [92, 91, 90]], [0.7, [138, 136, 132]], [1.0, [184, 182, 176]],
 ];
 // Earth: green lowland -> tan -> brown -> grey-white peaks (used around the satellite image)
 const EARTH_ELEV_STOPS = [
@@ -51,6 +61,16 @@ const STYLE = {
     sky: ['#060609', '#120e11', FOG], hemi: [0xffe0cc, 0x2a100a], skirt: 0x3a140b,
     elevStops: null, // ELEV_STOPS
     colours: [['elevation', 'Elevation'], ['slope', 'Slope']], exag: [5, 10], exag0: 5,
+    dem: 'MGS MOLA', slopeSrc: 'MOLA', images: 'Viking, CTX', ti: { src: 'TES', mid: 250, span: 0.6 },
+  },
+  moon: {
+    title: '3D terrain · Moon',
+    help: 'Drag to rotate · right-drag (or Ctrl/⌘-drag) to pan · scroll or pinch to zoom · click the ground to set A and B.',
+    sky: ['#000000', '#030304', '#0b0b0e'], hemi: [0xf4f4f4, 0x161616], skirt: 0x2e2e30,
+    elevStops: MOON_ELEV_STOPS,
+    colours: [['elevation', 'Elevation'], ['slope', 'Slope']], exag: [5, 10], exag0: 5,
+    // Diviner thermal inertia on the Moon only spans ~25-60 TIU
+    dem: 'LRO LOLA', slopeSrc: 'LOLA', images: 'LRO WAC, Kaguya TC', ti: { src: 'Diviner', mid: 42, span: 0.15 },
   },
   earth: {
     title: '3D terrain · Earth',
@@ -91,7 +111,7 @@ export function createView3D({ routeEvents }) {
   let exaggeration = 5;
   let userExaggeration = false; // the user picked one: don't change it automatically
   let colourMode = 'elevation';
-  let world = 'mars';     // 'mars' (route planner) or 'earth' (analog areas)
+  let world = 'mars';     // 'mars' / 'moon' (route planner) or 'earth' (analog areas)
   let style = STYLE.mars;
   const elevStops = () => style.elevStops ?? ELEV_STOPS;
   // elevation colour of a height (km); on Earth the sea (NASADEM stores it as exactly 0 m) is blue
@@ -111,7 +131,7 @@ export function createView3D({ routeEvents }) {
   function setWorld(w) {
     world = w;
     style = STYLE[w];
-    KM_PER_DEG = (w === 'earth' ? WORLDS.earth.radius / 1000 : MARS_R) * DEG;
+    KM_PER_DEG = (w === 'earth' ? WORLDS.earth.radius / 1000 : RADIUS[w] ?? MARS_R) * DEG;
     const sky = document.createElement('canvas');
     sky.width = 2; sky.height = 256;
     const sc = sky.getContext('2d');
@@ -281,7 +301,17 @@ export function createView3D({ routeEvents }) {
   }
 
   // ---- building the terrain
-  async function build(region) {
+  // build() never leaves the view stuck on "Reading…": a failure shows in the status line
+  function build(region) {
+    const my = building + 1;
+    return buildTerrain(region).catch((err) => {
+      console.error(err);
+      if (my !== building) return;
+      root.classList.remove('busy');
+      setStatus(`Could not load the elevation data (${err.message || err}). Close the 3D view and open it again to retry.`);
+    });
+  }
+  async function buildTerrain(region) {
     const my = ++building;
     setStatus(world === 'earth' ? 'Reading NASA elevation data (NASADEM)…' : 'Reading NASA elevation data…');
     root.classList.add('busy');
@@ -301,10 +331,10 @@ export function createView3D({ routeEvents }) {
     const n = rows * cols;
     const raw = new Float32Array(n);
     const slopes = new Float32Array(n);
-    const surface = new Float32Array(n).fill(NaN); // Mars: TES thermal inertia: low = dust, high = rock
+    const surface = new Float32Array(n).fill(NaN); // thermal inertia (Mars TES, Moon Diviner): low = dust, high = rock
     const fine = new Float32Array(n).fill(1);
     let missing = 0;
-    let pxKm; let demSource = 'mola';
+    let pxKm; let demSource = world === 'moon' ? 'lola' : 'mola';
     const latOf = (r) => Math.max(-89.9, Math.min(89.9, lat0 - az.pos[r] / KM_PER_DEG));
     const lonOf = (c) => ((((lon0 + ax.pos[c] / kx) + 180) % 360) + 360) % 360 - 180;
     if (world === 'earth') {
@@ -317,6 +347,7 @@ export function createView3D({ routeEvents }) {
       const dem = await loadDetail(W, lat0, lon0, halfM, step,
         (d, t) => setStatus(`Reading NASA elevation data (NASADEM)… ${Math.round((100 * d) / t)}%`));
       if (my !== building) return;
+      if (dem.source) demSource = dem.source; // NASADEM unreachable: AWS terrain tiles instead
       for (let r = 0; r < rows; r++) {
         const lat = latOf(r);
         for (let c = 0; c < cols; c++) raw[r * cols + c] = dem.get(lat, lonOf(c)) / 1000; // km
@@ -334,14 +365,14 @@ export function createView3D({ routeEvents }) {
       pxKm = demSource === 'nasadem' ? 0.03 * step : 0.04;
     } else {
       const index = await loadIndex();
-      const metas = index.mars;
+      const metas = index[world];
       // the most detailed elevation, slope and surface tiles over the whole model
       const box = [Math.max(-89.9, lat0 - ez / 2 / KM_PER_DEG), Math.min(89.9, lat0 + ez / 2 / KM_PER_DEG),
         lon0 - Math.min(179, ex / 2 / kx), lon0 + Math.min(179, ex / 2 / kx)];
       const [fe, fs, fu] = await Promise.all([
-        layerSampler('elevation', metas.elevation, ...box),
-        layerSampler('slope', metas.slope, ...box),
-        layerSampler('surface', metas.surface, ...box),
+        layerSampler('elevation', metas.elevation, ...box, undefined, world),
+        layerSampler('slope', metas.slope, ...box, undefined, world),
+        layerSampler('surface', metas.surface, ...box, undefined, world),
       ]);
       if (my !== building) return;
       setStatus('Removing the storage steps from the elevation data…');
@@ -624,7 +655,7 @@ export function createView3D({ routeEvents }) {
         mesh.material.needsUpdate = true;
         $('terrain3d-legend').textContent = world === 'earth'
           ? 'Colour: satellite image (Esri, Maxar, Earthstar Geographics) draped on the terrain'
-          : 'Colour: spacecraft images (Viking, CTX) draped on the terrain';
+          : `Colour: spacecraft images (${style.images}) draped on the terrain`;
         return;
       }
       colourMode = 'elevation';
@@ -637,10 +668,10 @@ export function createView3D({ routeEvents }) {
         c = Number.isNaN(slopes[i]) ? [0.5, 0.5, 0.5] : ramp(SLOPE_STOPS, slopes[i] / 25);
       } else {
         c = elevColour(heights[i], lo, span);
-        // real surface type (TES thermal inertia): fine bright dust lighter, rock and bedrock darker
+        // real surface type (thermal inertia): fine bright dust lighter, rock and bedrock darker
         const ti = surface[i];
         if (!Number.isNaN(ti)) {
-          const t = Math.min(1, Math.max(-1, (Math.log10(ti) - Math.log10(250)) / 0.6));
+          const t = Math.min(1, Math.max(-1, (Math.log10(ti) - Math.log10(style.ti.mid)) / style.ti.span));
           const f = 1 - 0.12 * t;
           c = [c[0] * f, c[1] * f, c[2] * f];
         }
@@ -650,10 +681,10 @@ export function createView3D({ routeEvents }) {
     col.needsUpdate = true;
     mesh.material.needsUpdate = true;
     $('terrain3d-legend').innerHTML = colourMode === 'slope'
-      ? `Colour: slope (${world === 'earth' ? 'from NASADEM' : 'MOLA'}) · <span style="color:#4ca06e">■</span> flat · <span style="color:#d7be5a">■</span> 8° · <span style="color:#e6823c">■</span> 15° · <span style="color:#c83232">■</span> 25°+`
+      ? `Colour: slope (${world === 'earth' ? 'from NASADEM' : style.slopeSrc}) · <span style="color:#4ca06e">■</span> flat · <span style="color:#d7be5a">■</span> 8° · <span style="color:#e6823c">■</span> 15° · <span style="color:#c83232">■</span> 25°+`
       : world === 'earth'
         ? `Colour: elevation (green = ${fmtM(lo)}, brown to white = ${fmtM(hi)})`
-        : `Colour: elevation (dark = ${fmtM(lo)}, pale = ${fmtM(hi)}), lighter where the ground is dusty and darker where it's rocky (TES thermal inertia)`;
+        : `Colour: elevation (dark = ${fmtM(lo)}, pale = ${fmtM(hi)}), lighter where the ground is dusty and darker where it's rocky (${style.ti.src} thermal inertia)`;
   }
 
   // Spacecraft images for the texture, read from the same tile servers as the 2D map.
@@ -677,8 +708,10 @@ export function createView3D({ routeEvents }) {
       ctx.putImageData(new ImageData(px, W, H), 1, 1); // (putImageData ignores the translate)
       drawn = 1;
     }
-    for (const layer of world === 'earth' ? [] : BODIES.mars.layers) {
+    for (const layer of world === 'earth' ? [] : BODIES[world].layers) {
       const tile = layer.tileSize ?? 256;
+      // a mosaic that only covers part of the globe (Kaguya: 70 S - 70 N) is left out beyond it
+      if (layer.bounds && (north > layer.bounds[1][0] || south < layer.bounds[0][0])) continue;
       const worldPxNeeded = (W / (east - west)) * 360;
       let z = Math.ceil(Math.log2(worldPxNeeded / 512));
       z = Math.min(layer.maxNativeZoom, Math.max(0, z));
@@ -948,7 +981,7 @@ export function createView3D({ routeEvents }) {
       $('terrain3d-info').innerHTML = `${src} · ~${Math.round(pxKm * 1000)} m per data pixel · ${scale}`;
       return;
     }
-    $('terrain3d-info').innerHTML = `<strong>Real NASA elevation</strong> (MGS MOLA) · ~${pxKm.toFixed(1)} km per data pixel, smoothed ·
+    $('terrain3d-info').innerHTML = `<strong>Real NASA elevation</strong> (${style.dem}) · ~${pxKm.toFixed(1)} km per data pixel, smoothed ·
       ${scale}
       Craters smaller than ~10 km are blurred at this data resolution.`;
   }
@@ -995,7 +1028,7 @@ export function createView3D({ routeEvents }) {
   routeEvents?.addEventListener('focus', ({ detail }) => { if (isOpen) focusOn(detail.k); });
 
   /**
-   * opts: world ('mars' default, or 'earth'); region { lat, lon, wKm, hKm, ringKm?, name? } to
+   * opts: world ('mars' default, 'moon' or 'earth'); region { lat, lon, wKm, hKm, ringKm?, name? } to
    * show (else the route, else the 2D map's view); planner; getLeafletView; onClose.
    */
   function open(opts = {}) {
@@ -1021,7 +1054,7 @@ export function createView3D({ routeEvents }) {
     if (!reg) {
       const v = getLeafletView();
       reg = v.wKm > MAX_REGION_KM
-        ? { ...SHOWCASE, note: 'zoom the 2D map in on any area, or plan a route, to see it here' }
+        ? { ...(SHOWCASE[world] ?? SHOWCASE.mars), note: 'zoom the 2D map in on any area, or plan a route, to see it here' }
         : v;
     }
     triedImagery = false;

@@ -2,21 +2,32 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './style.css';
 import { BODIES } from './bodies.js';
-import { circlePoints, formatLatLon } from './geo.js';
+import { circlePoints, formatLatLon, parseLatLon } from './geo.js';
 import { createGlobe, globesReady } from './globes.js';
 import { drawStarfield } from './starfield.js';
 import { VIEWS, loadIndex, createOverlay, legendHtml, summaryColour, SUMMARY_GRADIENT_CSS, retryFailedTiles } from './overlays.js';
 import { summarize } from './areastats.js';
 import { askWeights, parseWeights, formatWeights } from './weights.js';
-import { PARAMS, WEIGHT_STEPS, DEFAULT_WEIGHTS, DEFAULT_COUNT, MAX_COUNT, MIN_SEPARATION_KM, parseAnalogWeights, siteValues, findAnalogs, displayValue,
+import { PARAMS, WEIGHT_STEPS, DEFAULT_WEIGHTS, DEFAULT_COUNT, MAX_COUNT, MIN_SEPARATION_KM, parseAnalogWeights, siteValues, findAnalogs, formatValue as formatParam, formatSite,
   similarity } from './analogs.js';
 import { findSimilar, MIN_DISTANCE_KM as SIMILAR_MIN_KM, DEFAULT_COUNT as SIMILAR_DEFAULT_COUNT,
   MAX_COUNT as SIMILAR_MAX_COUNT, cellKm } from './similar.js';
 import { addLandmarks } from './landmarks.js';
 import { addCandidateSites } from './candidates.js';
+import { reportCardHtml, novelty, ordinal } from './reportcard.js';
+import { loadCountries, parseCountryFilter, formatCountryFilter, filteredOut, describeFilter } from './countries.js';
+import { createSimPanel } from './simplan/panel.js';
+import { findSites, LATITUDE, MIN_SEPARATION_KM as SITE_SEPARATION_KM } from './sitefinder.js';
+import { askCriteria, criterionName, PRESETS } from './finderDialog.js';
+import { inKnownRegion, KNOWN_REGION_KM } from './knownAnalogs.js';
+import { refineResults, REFINE_BELOW_KM } from './refine.js';
+import { featuresNear, featuresHtml } from './features.js';
 import { addRuler, isMeasuring } from './ruler.js';
 import { maybeStartTutorial, startTour } from './tutorial.js';
 import { createRoutePlanner, routeEvents } from './route/planner.js';
+import { siteCrossing, sameRouteOnEarth, destination, bearingDeg } from './route/compare.js';
+import { haversineKm as routeKm } from './route/grid.js';
+import { findEquivalents, SHARED, CLOSE_MATCH } from './equivalents.js';
 import { projection, PROJECTIONS } from './projections.js';
 import { WarpedImagery, sourceGrid } from './reproject.js';
 import moonTexture from './assets/moon-texture.jpg';
@@ -316,10 +327,13 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
   let analogWeights = parseAnalogWeights(params.get('aw')); // ... and for 'Find Earth analogs'
   let analogMode = params.get('am') === 'extreme' ? 'extreme' : 'match';
   let analogCount = parseCount(params.get('an'));
+  let analogNewOnly = params.get('anew') === '1';
+  let analogCountries = parseCountryFilter(params.get('ac')); // countries to avoid / keep to
   let similarCount = parseCount(params.get('sn'), SIMILAR_DEFAULT_COUNT);
   let similarShown = false;                    // 'Find similar spots' results are on the map
   let available = {};                          // data layers for this body (from index.json)
-  let planner = null;                          // Mars route planner (src/route/), when open
+  let planner = null;
+  let driveAt = null;                          // Earth analogs: plan the site's route at a result                          // Mars / Moon route planner (src/route/), when open
   let describe = () => {};
   function selectView(v) {
     view = v;
@@ -334,7 +348,7 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
   // Keep selection, radius and view in the address, without adding history
   // steps, so coming back to this page (e.g. from Earth) restores them.
   // Earth keeps where it was opened from (and an analog search's site) in its address
-  const keep = key === 'earth' ? ['from', 'site', 'sr', 'w', 'mode', 'n'].filter((k) => params.has(k)) : [];
+  const keep = (key === 'earth' ? ['from', 'site', 'sr', 'w', 'mode', 'n', 'new', 'src', 'str', 'sss'] : ['cmp', 'ca', 'em']).filter((k) => params.has(k));
   function query() {
     const q = new URLSearchParams();
     for (const k of keep) q.set(k, params.get(k));
@@ -351,6 +365,8 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
       q.set('aw', formatWeights(analogWeights));
       q.set('am', analogMode);
       q.set('an', analogCount);
+      if (analogNewOnly) q.set('anew', '1');
+      if (formatCountryFilter(analogCountries)) q.set('ac', formatCountryFilter(analogCountries));
     }
     return q.toString();
   }
@@ -360,8 +376,90 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
     lastPage[key] = location.hash; // so 'Back to Mars view' (and leaving the 3D view) restores it
   };
   saveToUrl();
-  // No analog search from Earth itself
+  // No analog search from Earth itself; instead the reverse: the Mars and Moon equivalents
   document.querySelector('#select-info .actions').hidden = key === 'earth';
+  $('equiv').hidden = key !== 'earth' || analog;
+  let equivToken = 0;
+  function resetEquiv() {
+    equivToken++;
+    $('equiv-status').textContent = '';
+    $('equiv-results').replaceChildren();
+    $('find-equiv').disabled = false;
+  }
+  resetEquiv();
+  $('find-equiv').onclick = async () => {
+    if (!current) return;
+    const my = ++equivToken;
+    const at = { ...current };
+    $('find-equiv').disabled = true;
+    $('equiv-results').replaceChildren();
+    const status = (t) => { if (my === equivToken) $('equiv-status').textContent = t; };
+    try {
+      const index = await loadIndex();
+      const found = await findEquivalents({ lat: at.lat, lon: at.lon, radiusKm, index, onProgress: status });
+      if (my !== equivToken) return;
+      if (!found) { status('No land data here: pick a place on land (not the sea or the ice sheets).'); return; }
+      status(`Most like this ${radiusKm} km area on Earth (temperatures, slope and relief):`);
+      $('equiv-results').replaceChildren(...['mars', 'moon'].map((w) => equivGroup(w, found)));
+    } catch (err) {
+      console.error(err);
+      status('The search failed to load its data.');
+    } finally {
+      if (my === equivToken) $('find-equiv').disabled = false;
+    }
+  };
+  // One world's matches: the best % (or "no close equivalent"), the spots, a comparison table
+  function equivGroup(world, { place, worlds }) {
+    const W = worlds[world];
+    const name = BODIES[world].name;
+    const the = world === 'moon' ? 'the Moon' : name;
+    const box = document.createElement('section');
+    box.className = `equiv-world ${W.close ? 'close' : 'far'}`;
+    const best = W.results[0];
+    const where = (r) => (r.landmark ? `near ${r.landmark.name}${r.landmark.km > 25 ? ` (${Math.round(r.landmark.km)} km)` : ''}` : formatLatLon(r.lat, r.lon));
+    box.innerHTML = `<p class="equiv-head"><strong>${name}</strong> ${W.close
+      ? `<span class="equiv-badge ok">${best.match}% match</span>`
+      : `<span class="equiv-badge far">no close equivalent</span>`}</p>
+      <p class="sub">${!best ? `No ${name} data to compare with.` : W.close
+    ? `The closest ${name} equivalent is ${where(best)}.`
+    : `Nothing on ${the} reaches ${CLOSE_MATCH}%: the nearest is ${where(best)}, a ${best.match}% match.`}</p>`;
+    // the best spot shown; the others and the comparison folded away (keeps the panel short)
+    const list = document.createElement('ol');
+    list.className = 'equiv-list';
+    const more = document.createElement('ol');
+    more.className = 'equiv-list';
+    W.results.forEach((r, i) => {
+      const li = document.createElement('li');
+      li.innerHTML = `<button type="button" title="Open this spot on the ${name} map"><span class="where"></span><span class="sim">${r.match}%</span></button>`;
+      li.querySelector('.where').innerHTML = `${r.landmark ? `${r.landmark.name}<span class="sub"> · ${formatLatLon(r.lat, r.lon)}</span>` : formatLatLon(r.lat, r.lon)}`;
+      li.querySelector('button').onclick = () => {
+        location.hash = `#/${world}?lat=${r.lat.toFixed(4)}&lon=${r.lon.toFixed(4)}&r=${radiusKm}`;
+      };
+      (i ? more : list).append(li);
+    });
+    box.append(list);
+    if (best) {
+      const rows = Object.entries(SHARED).map(([k, s]) => {
+        const rel = k in W.relative ? ` <span class="sub" title="Beyond anything on ${name}: matched to the same percentile of ${name}">(as ${Math.round(W.relative[k] * 100)}th pct)</span>` : '';
+        return `<tr><td>${s.name}</td><td>${s.fmt(place[k])}${rel}</td><td>${Number.isFinite(best.values[k]) ? s.fmt(best.values[k]) : '–'}</td></tr>`;
+      });
+      rows.push(`<tr><td>Rain</td><td>${Math.round(place.rainMm).toLocaleString()} mm/yr</td><td>none</td></tr>`);
+      const det = document.createElement('details');
+      det.className = 'equiv-compare';
+      det.innerHTML = `<summary>Compare${W.results.length > 1 ? ` · ${W.results.length - 1} more spots` : ''}</summary>
+        <table><thead><tr><th></th><th>Earth</th><th>${name}</th></tr></thead><tbody>${rows.join('')}</tbody></table>
+        <p class="sub">Averages over a ${radiusKm} km circle on both worlds. Temperatures beyond anything on ${the} are matched relatively:
+        as hot or cold for ${the} as this place is for Earth. Rain beyond a desert's (250 mm a year) lowers the % match.</p>`;
+      if (more.children.length) {
+        const h = document.createElement('p');
+        h.className = 'sub';
+        h.textContent = `Next best on ${the} (at least 500 km apart):`;
+        det.append(h, more);
+      }
+      box.append(det);
+    }
+    return box;
+  }
 
   // ---- Menu drawer
   const menu = $('menu');
@@ -576,6 +674,7 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
   function select(lat, lon, opts, siteName = null) {
     current = { lat, lon };
     zoomedIn = false;
+    resetEquiv();
     $('select-hint').hidden = true;
     $('select-info').hidden = false;
     const formatApproximate = (value, positive, negative) =>
@@ -587,6 +686,8 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
     $('select-site').textContent = siteName
       ? `${siteName} · approximate region centre, not a touchdown point. No global Moon ice layer is available.`
       : '';
+    $('goto-msg').textContent = ''; // a new selection replaces any "Go to coordinates" message
+    $('goto-form').classList.remove('bad');
     draw(opts);
     saveToUrl();
     updateSummary();
@@ -637,9 +738,9 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
   };
 
   map.on('click', (e) => {
-    if (analog || similarShown) return; // paused while search results are shown
     if (isMeasuring()) return; // the ruler has the clicks
     if (planner?.isOpen()) { planner.click(e.latlng); return; } // route planner picks A and B
+    if (analog || similarShown) return; // paused while search results are shown
     // polar maps: ignore clicks in the empty corners outside the world disc
     if (proj.inside) {
       const n = 256 * 2 ** map.getZoom();
@@ -656,6 +757,31 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
     select(e.latlng.lat, e.latlng.lng);
   });
   $('clear-selection').onclick = clear;
+
+  // ---- Go to typed coordinates: selects the area there, as a click would
+  const gotoMsg = (text, bad = false) => {
+    $('goto-msg').textContent = text;
+    $('goto-form').classList.toggle('bad', bad);
+  };
+  $('goto-input').value = '';
+  $('goto-input').title = key === 'earth'
+    ? 'Latitude, longitude in degrees (south and west negative), or with N/S/E/W'
+    : 'Latitude, longitude in degrees: planetocentric, east longitude (south and west negative, or 0–360° E), or with N/S/E/W';
+  gotoMsg('');
+  $('goto-input').oninput = () => gotoMsg('');
+  $('goto-form').onsubmit = (e) => {
+    e.preventDefault();
+    const p = parseLatLon($('goto-input').value);
+    if (p.error) { gotoMsg(p.error, true); return; }
+    // e.g. the Mercator map stops short of the poles
+    const maxLat = proj.bounds ? L.latLngBounds(proj.bounds).getNorth() : 90;
+    if (Math.abs(p.lat) > maxLat) {
+      gotoMsg(`This map only reaches ${Math.floor(maxLat)}° ${p.lat > 0 ? 'N' : 'S'}.${key === 'earth' ? '' : ' Switch to a polar map in “View”.'}`, true);
+      return;
+    }
+    select(p.lat, p.lon, { fit: 'always' });
+    gotoMsg(`Selected ${formatLatLon(p.lat, p.lon)}.`);
+  };
 
   // Is a screen point on the selected area? (Tiny areas count within ~14 px of their centre,
   // so they can be clicked again even when the map is zoomed far out.)
@@ -709,13 +835,19 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
     return true;
   }
   $('find-analogs').onclick = () => findEarthAnalogs(current);
-  // Ask for the weights, then open Earth to search for analogs of an area around 'at'
-  async function findEarthAnalogs(at) {
+  // Ask for the weights, then open Earth to search for analogs of an area around 'at'.
+  // With a planned route: the area is the circle around the route (its midpoint, half its length,
+  // within the allowed radii), and the route goes along, to drive it again at the analogs.
+  async function findEarthAnalogs(at, route = null) {
+    const areaKm = route ? Math.min(MAX_RADIUS_KM, Math.max(MIN_RADIUS_KM, Math.round(route.km / 2))) : radiusKm;
+    const countryData = await loadCountries().catch(() => null); // the filter is optional
     const chosen = await askWeights({
-      heading: 'Find Earth analogs',
-      subheading: `${body.name} · ${formatLatLon(at.lat, at.lon)} · ${radiusKm} km radius`,
+      countries: countryData ? { value: analogCountries, list: countryData.list } : null,
+      heading: route ? 'Find Earth analogs for this route' : 'Find Earth analogs',
+      subheading: `${body.name} · ${formatLatLon(at.lat, at.lon)} · ${areaKm} km radius`,
       action: 'Find Earth analogs →',
-      items: Object.entries(PARAMS).map(([k, p]) => ({ key: k, name: p.name, help: p.help })),
+      items: Object.entries(PARAMS).filter(([, p]) => !p.worlds || p.worlds.includes(key))
+        .map(([k, p]) => ({ key: k, name: p.name, help: p.help })),
       steps: WEIGHT_STEPS,
       initial: { ...DEFAULT_WEIGHTS, ...analogWeights },
       defaults: DEFAULT_WEIGHTS,
@@ -731,8 +863,14 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
             'hottest or biggest day–night swing.'],
         ],
       },
+      toggle: { value: analogNewOnly, label: 'Only new places',
+        help: `Leave out known analog regions (within ${KNOWN_REGION_KM} km of a site already used for Moon or Mars research).` },
     });
     if (!chosen) return;
+    analogNewOnly = chosen.toggle;
+    delete chosen.toggle;
+    if (chosen.countries) analogCountries = chosen.countries;
+    delete chosen.countries;
     analogMode = chosen.mode;
     analogCount = chosen.count;
     delete chosen.mode;
@@ -740,7 +878,15 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
     analogWeights = chosen;
     saveToUrl();
     const site = new URLSearchParams({ from: key, site: `${at.lat.toFixed(4)},${at.lon.toFixed(4)}`,
-      sr: radiusKm, w: formatWeights(analogWeights), mode: analogMode, n: analogCount });
+      sr: areaKm, w: formatWeights(analogWeights), mode: analogMode, n: analogCount });
+    if (analogNewOnly) site.set('new', '1');
+    if (route) {
+      const f = (p) => `${p.lat.toFixed(4)},${p.lon.toFixed(4)}`;
+      site.set('src', `${f(route.a)};${f(route.b)}`);
+      site.set('str', route.traveller);
+      if (route.season) site.set('sss', route.season);
+    }
+    if (formatCountryFilter(analogCountries)) site.set('c', formatCountryFilter(analogCountries));
     location.hash = `#/earth?${site}`;
   }
   $('find-similar').onclick = async () => {
@@ -762,6 +908,7 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
     $('analog-banner').hidden = true;
     $('results-analogs').hidden = true;
     $('select-panel').hidden = false;
+    $('back-to-site').textContent = '← Back to this site';
   }
   function showSimilarResults() {
     const site = { ...current };
@@ -856,11 +1003,114 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
     }
   }
 
-  // ---- Route planner (Mars only): A to B, with the dangers on the way
-  $('plan-route').hidden = key !== 'mars';
-  if (key === 'mars') {
+  // ---- 'Find sites': search the whole world by criteria instead of clicking (src/sitefinder.js)
+  const finderWorld = key === 'mars' || key === 'moon';
+  $('finder-btn').hidden = !finderWorld;
+  $('finder-btn').onclick = async () => {
+    if (!finderWorld || !Object.keys(available).length) return;
+    const chosen = await askCriteria({ body: key, bodyName: body.name, layers: available, radiusKm, initial: finderState[key] });
+    if (!chosen) return;
+    finderState[key] = chosen;
+    showFoundSites(chosen);
+  };
+  // "Slope ≤ 3° (lower is better, ×2)"
+  const fmtCrit = (k) => (k === LATITUDE ? (v) => `${Math.round(v * 10) / 10}°`
+    : k === 'relief' ? (v) => `${Math.round(v * 1000)} m` : (v) => formatValue(available[k], v));
+  function describeLimits(k, c) {
+    const f = fmtCrit(k);
+    const lim = c.min !== undefined && c.max !== undefined ? `${f(c.min)} to ${f(c.max)}`
+      : c.min !== undefined ? `≥ ${f(c.min)}` : c.max !== undefined ? `≤ ${f(c.max)}` : '';
+    const pref = c.prefer ? `${lim ? ', ' : ''}${c.prefer === 'low' ? 'lower' : 'higher'} is better` : '';
+    return `${lim}${pref}${c.weight !== 1 ? ` (×${c.weight})` : ''}`;
+  }
+  function showFoundSites({ criteria, count, preset }) {
+    exitSimilar();
+    const r = radiusKm;
+    similarShown = true; // map clicks pause while results are shown, as for similar spots
+    $('select-panel').hidden = true;
+    $('analog-heading').textContent = `Sites on ${body.name} that meet`;
+    $('analog-source').textContent = PRESETS[key]?.find((p) => p.id === preset)?.name ?? 'Your criteria';
+    $('analog-radius').textContent = `${r} km radius (set with the radius slider) · at least ${SITE_SEPARATION_KM} km apart`;
+    $('analog-weights').textContent = Object.entries(criteria).map(([k, c]) => `${criterionName(k)} ${describeLimits(k, c)}`).join(' · ');
+    $('analog-results').replaceChildren();
+    $('analog-compare').hidden = true;
+    $('analog-status').textContent = 'Searching…';
+    $('analog-banner').hidden = false;
+    $('back-to-site').textContent = 'Change criteria';
+    $('back-to-site').onclick = () => $('finder-btn').click();
+    $('exit-results').onclick = exitSimilar;
+    $('results-analogs').hidden = true;
+    const thisMap = map;
+    const still = () => map === thisMap && similarShown;
+    findSites({ body: key, sphereKm: body.radiusKm, layers: available, criteria, radiusKm: r, count,
+      onProgress: (text) => { if (still()) $('analog-status').textContent = text; } })
+      .then((found) => { if (still()) showSiteResults(found, criteria, r); })
+      .catch((err) => {
+        console.error(err);
+        if (still()) $('analog-status').textContent = 'The search failed to load its data. Please try again.';
+      });
+  }
+  function showSiteResults(found, criteria, r) {
+    const { results, used, passShare, shares, cellKm: cell } = found;
+    if (import.meta.env.DEV) console.log('sites', found);
+    const pct = (x) => (x >= 0.1 ? `${Math.round(x * 100)}%` : x >= 0.001 ? `${(x * 100).toFixed(1)}%` : x > 0 ? 'under 0.1%' : '0%');
+    // when nothing passes, say which limit rules out most of the surface
+    const strictest = used.filter((k) => criteria[k].min !== undefined || criteria[k].max !== undefined)
+      .sort((a, b) => shares[a] - shares[b])[0];
+    $('analog-status').textContent = results.length
+      ? `${pct(passShare)} of ${body.name}’s surface meets every limit. Best ${results.length === 1 ? 'site' : `${results.length} sites`}, ranked by how well they fit (~${Math.round(cell)} km detail).`
+      : `No area meets every limit.${strictest ? ` The strictest: ${criterionName(strictest)} (${pct(shares[strictest])} of the surface passes it on its own).` : ''} Try “Change criteria”.`;
+    similarGroup = L.layerGroup().addTo(map);
+    const markers = [];
+    const items = results.map((res, i) => {
+      L.polygon(circlePoints(res.lat, res.lon, r, body.radiusKm), { className: 'analog-area', interactive: false }).addTo(similarGroup);
+      const m = L.marker([res.lat, res.lon], {
+        icon: L.divIcon({ className: '', html: `<span class="analog-marker">${i + 1}</span>`, iconSize: [26, 26] }),
+        keyboard: false, title: `Site ${i + 1}`,
+      }).addTo(similarGroup);
+      m.on('click', () => pick(i));
+      markers.push(m);
+      const li = document.createElement('li');
+      li.innerHTML = '<button type="button" aria-pressed="false"><span class="num"></span><span class="where"></span><span class="sim"></span></button>';
+      li.querySelector('.num').textContent = i + 1;
+      li.querySelector('.where').textContent = formatLatLon(res.lat, res.lon);
+      li.querySelector('.sim').textContent = `${Math.round(res.fit * 100)}% fit`;
+      li.querySelector('button').onclick = () => pick(i);
+      return li;
+    });
+    $('analog-results').replaceChildren(...items);
+    if (results.length) {
+      map.flyToBounds(L.latLngBounds(results.map((p) => [p.lat, p.lon])).pad(0.3), { padding: [80, 80], duration: 0.8 });
+    }
+    function pick(i) {
+      const res = results[i];
+      items.forEach((li, j) => li.querySelector('button').setAttribute('aria-pressed', i === j));
+      markers.forEach((m, j) => m.getElement()?.firstChild?.classList.toggle('picked', i === j));
+      zoomToArea(res.lat, res.lon, r);
+      const rows = used.map((k) => `<tr><td>${criterionName(k)}</td><td>${describeLimits(k, criteria[k]) || '–'}</td>` +
+        `<td>${fmtCrit(k)(res.values[k])}</td></tr>`);
+      const box = $('analog-compare');
+      box.innerHTML = `<p class="c-title">Site ${i + 1} · ${formatLatLon(res.lat, res.lon)} · ${Math.round(res.fit * 100)}% fit</p>
+        <table><thead><tr><th></th><th>Criterion</th><th>Here</th></tr></thead><tbody>${rows.join('')}</tbody></table>
+        <p class="sub" style="margin-top:.4rem">Averages over the ${r} km area from the map data at ~${Math.round(cell)} km detail.
+        Fit: where the site stands on your preferences among all areas that meet the limits, by importance (100% = the best of them on every one); with no preferences, how comfortably it meets the limits.</p>
+        <button type="button" class="view-3d-btn finder-select">Select this site &rarr;</button>`;
+      box.querySelector('.finder-select').onclick = () => { exitSimilar(); select(res.lat, res.lon, { fit: 'always' }); };
+      box.hidden = false;
+      $('results-analogs').textContent = `Find Earth analogs for site ${i + 1}`;
+      $('results-analogs').onclick = () => findEarthAnalogs(res);
+      $('results-analogs').hidden = false;
+    }
+  }
+
+  // ---- Route planner (Mars and Moon): A to B, with the dangers on the way. On Earth only at an
+  // analog search's results, to drive the same route there (src/route/compare.js).
+  const routeWorld = true;
+  $('plan-route').hidden = key === 'earth' && analog; // (at Earth analog results: 'Drive the same route here')
+  $('route-analogs').hidden = true;
+  if (routeWorld) {
     const showRoutePanels = (open) => {
-      $('select-panel').hidden = open;
+      $('select-panel').hidden = open || analog;
       if (open) $('area-panel').hidden = true; else updateSummary();
     };
     // 3D terrain of the route: the button shows once A and B are set (and stays while the
@@ -868,14 +1118,102 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
     const btn3d = $('btn-3d');
     const update3dButton = () => {
       const r = planner?.result();
-      btn3d.hidden = !((r?.open && r.a && r.b) || terrainView?.isOpen());
+      btn3d.hidden = key === 'earth' || !((r?.open && r.a && r.b) || terrainView?.isOpen());
     };
-    planner = createRoutePlanner(map, params, () => { showRoutePanels(planner?.isOpen() ?? true); saveToUrl(); update3dButton(); });
+    // Earth: the site route to compare with: the one planned at the site, or a crossing of the site area
+    let compare = null;
+    const pairOf = (text) => {
+      const pts = (text ?? '').split(';').map((t) => t.split(',').map(Number));
+      return pts.length === 2 && pts.every((p) => p.length === 2 && p.every(Number.isFinite))
+        ? { a: { lat: pts[0][0], lon: pts[0][1] }, b: { lat: pts[1][0], lon: pts[1][1] } } : null;
+    };
+    // Moon / Mars opened from an Earth route's equivalents: compare with that Earth route
+    if (key !== 'earth' && params.get('cmp') === 'earth' && pairOf(params.get('ca'))) {
+      compare = { world: 'earth', ...pairOf(params.get('ca')), season: 0, match: params.has('em') ? Number(params.get('em')) : NaN };
+    }
+    if (key === 'earth' && analog) {
+      const from = BODIES[params.get('from')] && params.get('from') !== 'earth' ? params.get('from') : 'mars';
+      const [sLat, sLon] = (params.get('site') ?? '').split(',').map(Number);
+      const pts = (params.get('src') ?? '').split(';').map((t) => t.split(',').map(Number));
+      const ok = pts.length === 2 && pts.every((p) => p.length === 2 && p.every(Number.isFinite));
+      compare = ok
+        ? { world: from, a: { lat: pts[0][0], lon: pts[0][1] }, b: { lat: pts[1][0], lon: pts[1][1] }, season: Number(params.get('sss')) || 0 }
+        : { world: from, ...siteCrossing({ lat: sLat, lon: sLon }, radiusKm, from) };
+      if (!params.has('tr') && params.has('str')) params.set('tr', params.get('str')); // the same traveller
+    }
+    planner = createRoutePlanner(map, params, () => {
+      showRoutePanels(planner?.isOpen() ?? true); saveToUrl(); update3dButton();
+    }, key, { compare });
+    // Moon / Mars: with a route, find Earth analogs for it (and drive it there); the planner shows the button
     update3dButton(); // (a route restored from the address)
+    saveToUrl(); // (the planner's part of the address, now that `planner` is set)
+    $('route-analogs').onclick = () => {
+      const res = planner.result();
+      if (!res.a || !res.b) return;
+      const km = routeKm(res.a.lat, res.a.lon, res.b.lat, res.b.lon, body.radiusKm);
+      const mid = destination(res.a, bearingDeg(res.a, res.b), km / 2, body.radiusKm);
+      findEarthAnalogs(mid, { a: res.a, b: res.b, km, traveller: res.traveller, season: res.season });
+    };
+    // Earth: the Mars / Moon equivalent of a route. Opened from Mars (or the Moon) only that world
+    // is offered; opened from the home page, both. The search looks at the circle around the
+    // route (its midpoint, half its length), then opens that world's planner with the same route
+    // (length, direction, traveller) at the best-matching spot, compared with the Earth route.
+    if (key === 'earth') {
+      const fromWorld = params.get('from');
+      const offered = fromWorld === 'mars' || fromWorld === 'moon' ? [fromWorld] : ['mars', 'moon'];
+      for (const w of ['mars', 'moon']) {
+        const btn = $(`route-eq-${w}`);
+        btn.hidden = !offered.includes(w);
+        btn.disabled = false;
+        btn.textContent = `${w === 'mars' ? '🔴 Find the Mars' : '🌕 Find the Moon'} equivalent of this route`;
+        btn.onclick = () => routeEquivalent(w, btn);
+      }
+      $('route-eq-status').textContent = '';
+    }
+    let equivToken2 = 0;
+    async function routeEquivalent(w, btn) {
+      const res = planner.result();
+      if (!res.a || !res.b) return;
+      const my = ++equivToken2;
+      const label = btn.textContent;
+      const say = (t) => { if (my === equivToken2) $('route-eq-status').textContent = t; };
+      const km = routeKm(res.a.lat, res.a.lon, res.b.lat, res.b.lon, body.radiusKm);
+      const mid = destination(res.a, bearingDeg(res.a, res.b), km / 2, body.radiusKm);
+      const areaKm = Math.min(MAX_RADIUS_KM, Math.max(MIN_RADIUS_KM, Math.round(km / 2)));
+      const the = w === 'moon' ? 'the Moon' : 'Mars';
+      btn.disabled = true;
+      btn.textContent = `Searching ${the}…`;
+      try {
+        const found = await findEquivalents({ lat: mid.lat, lon: mid.lon, radiusKm: areaKm, index: await loadIndex(), onProgress: say, worlds: [w] });
+        if (my !== equivToken2) return;
+        const best = found?.worlds[w]?.results[0];
+        if (!found) { say('No land data around this route (sea or ice sheet): nothing to compare.'); return; }
+        if (!best) { say(`No ${BODIES[w].name} data to compare with.`); return; }
+        say(`${best.match}% match${best.match >= CLOSE_MATCH ? '' : ' (no close equivalent)'}: opening ${the}…`);
+        // the same route at the best spot: same length and direction, centred on it
+        const R = BODIES[w].radiusKm;
+        const brg = bearingDeg(res.a, res.b);
+        const line = { a: destination(best, (brg + 180) % 360, km / 2, R), b: destination(best, brg, km / 2, R) };
+        const f = (p) => `${p.lat.toFixed(4)},${p.lon.toFixed(4)}`;
+        const q = new URLSearchParams({ route: `${f(line.a)};${f(line.b)}`, tr: res.traveller, cmp: 'earth', ca: `${f(res.a)};${f(res.b)}`, em: best.match });
+        location.hash = `#/${w}?${q}`;
+      } catch (err) {
+        console.error(err);
+        say('The search failed to load its data.');
+      } finally {
+        if (my === equivToken2 && btn.isConnected) { btn.disabled = false; btn.textContent = label; }
+      }
+    }
+    // Earth analogs: 'Drive the same route here' at a result
+    driveAt = async (res) => {
+      const line = await sameRouteOnEarth(compare, res);
+      planner.setRoute(line.a, line.b, { turned: line.turned });
+    };
     $('plan-route').onclick = () => { if (shapes) clear(); planner.open(); };
     const set3dButton = (on) => {
       btn3d.setAttribute('aria-pressed', on);
-      btn3d.textContent = on ? '🗺 2D map' : '⛰ 3D terrain';
+      // the long word is hidden on phones, where the top bar is short of space
+      btn3d.innerHTML = on ? '🗺 2D<span class="long"> map</span>' : '⛰ 3D<span class="long"> terrain</span>';
     };
     set3dButton(false);
     btn3d.onclick = async () => {
@@ -884,6 +1222,7 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
       if (shapes) clear();
       set3dButton(true);
       terrainView.open({
+        world: key,
         planner,
         onClose: () => { set3dButton(false); update3dButton(); },
         getLeafletView: () => {
@@ -919,7 +1258,7 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
     select(ll.lat, ll.lng);
     return true;
   };
-  return { select, clear, current: () => current, saveToUrl };
+  return { select, clear, current: () => current, saveToUrl, driveAt: (res) => driveAt?.(res) };
 }
 
 // ---- Earth page opened from "Find Earth analogs": the search and its results ---------
@@ -977,11 +1316,13 @@ function showAnalogResults(params, selection) {
   if (!Object.values(weights).some((v) => v > 0)) Object.assign(weights, DEFAULT_WEIGHTS);
   const mode = params.get('mode') === 'extreme' ? 'extreme' : 'match';
   const count = parseCount(params.get('n'));
+  const newOnly = params.get('new') === '1';
+  const countryFilter = parseCountryFilter(params.get('c'));
 
   $('results-analogs').hidden = true;
   $('analog-heading').textContent = 'Earth analogs for';
   $('analog-source').textContent = `${source.name} · ${formatLatLon(lat, lon)}`;
-  $('analog-radius').textContent = `${r} km radius · ${mode === 'extreme' ? 'most extreme' : 'match my site'}`;
+  $('analog-radius').textContent = `${r} km radius · ${mode === 'extreme' ? 'most extreme' : 'match my site'}${newOnly ? ' · only new places' : ''}`;
   const w = Object.entries(weights).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
   const total = w.reduce((a, [, v]) => a + v, 0);
   $('analog-weights').textContent = `Weights: ${w.map(([k, v]) => `${PARAMS[k].name} ${Math.round((v / total) * 100)}%`).join(' · ')}`;
@@ -1001,25 +1342,40 @@ function showAnalogResults(params, selection) {
   $('analog-banner').hidden = false;
 
   const thisMap = map;
+  let countries = null;
   (async () => {
     const index = await loadIndex();
     const site = await siteValues(from, source.radiusKm, index[from] ?? {}, lat, lon, r);
     const t0 = performance.now();
-    const found = await findAnalogs({ site, weights, mode, radiusKm: r, count });
+    // countries: shown for every result, and (optionally) used to leave places out
+    countries = await loadCountries().catch(() => null);
+    if (countries && countryFilter.mode !== 'any') {
+      $('analog-radius').textContent += ` · ${describeFilter(countryFilter, countries)}`;
+    }
+    const exclude = (la, lo) => (newOnly && inKnownRegion(la, lo)) ||
+      (countries ? filteredOut(countryFilter, countries.at(la, lo)) : false);
+    const found = await findAnalogs({ site, weights, mode, radiusKm: r, count, exclude });
     if (map !== thisMap) return; // the page has changed meanwhile
-    if (import.meta.env.DEV) console.log(`analog search: ${Math.round(performance.now() - t0)} ms`, found, site);
+    if (r < REFINE_BELOW_KM && found.results.length) {
+      $('analog-status').textContent = 'Refining positions with ~5 km terrain data…';
+      await refineResults({ results: found.results, found, weights, radiusKm: r, slopeMeta: index.earth?.slope });
+      found.results.sort((a, b) => a.score - b.score);
+      if (map !== thisMap) return;
+    }
+    if (import.meta.env.DEV) { console.log(`analog search: ${Math.round(performance.now() - t0)} ms`, found, site); window.__lastAnalogs = found; }
     showResults(found, site);
   })().catch((err) => {
     console.error(err);
     $('analog-status').textContent = 'The search failed to load its data.';
   });
 
-  function showResults({ results, used, relative, targets }, site) {
+  function showResults(found, site) {
+    const { results, used } = found;
     const skipped = Object.keys(weights).filter((k) => weights[k] > 0 && !used.includes(k));
     $('analog-status').textContent = results.length
       ? (results.length === 1 ? 'Best area.' : `Best ${results.length} areas, at least ${MIN_SEPARATION_KM} km apart.`) +
         (skipped.length ? ` No ${source.name} data here for: ${skipped.map((k) => PARAMS[k].name).join(', ')}.` : '')
-      : 'No matching areas found.';
+      : (countryFilter.mode !== 'any' ? 'No matching areas found with this country filter.' : 'No matching areas found.');
     const group = L.layerGroup().addTo(map);
     const markers = [];
     const buttons = results.map((res, i) => {
@@ -1032,10 +1388,21 @@ function showAnalogResults(params, selection) {
       m.on('click', () => pick(i));
       markers.push(m);
       const li = document.createElement('li');
-      li.innerHTML = '<button type="button" aria-pressed="false"><span class="num"></span><span class="where"></span><span class="sim"></span></button>';
+      li.innerHTML = '<button type="button" aria-pressed="false"><span class="num"></span><span class="where"></span><span class="sim"></span><span class="nov"></span></button>';
       li.querySelector('.num').textContent = i + 1;
       li.querySelector('.where').textContent = formatLatLon(res.lat, res.lon);
+      res.country = countries ? countries.nameAt(res.lat, res.lon) : null;
+      if (res.country) {
+        const c = document.createElement('span');
+        c.className = 'country';
+        c.textContent = res.country;
+        li.querySelector('.where').append(c);
+      }
       li.querySelector('.sim').textContent = `${similarity(res.score)}% match`;
+      const nov = novelty(res.lat, res.lon);
+      const novEl = li.querySelector('.nov');
+      novEl.textContent = nov.known ? `Known analog region (${nov.site.name})` : 'New analog';
+      novEl.classList.add(nov.known ? 'known' : 'new');
       li.querySelector('button').onclick = () => pick(i);
       return li;
     });
@@ -1050,40 +1417,57 @@ function showAnalogResults(params, selection) {
       selection?.select(res.lat, res.lon);
       const area = L.latLngBounds(circlePoints(res.lat, res.lon, r, BODIES.earth.radiusKm));
       map.flyToBounds(area, { ...freeScreenPadding(), duration: 0.9, maxZoom: map.getMaxZoom() });
-      showComparison(i, res, site, relative, targets);
+      showComparison(i, res, site, found);
     }
   }
 
-  function showComparison(i, res, site, relative = {}, targets = {}) {
-    const fmt = (k, v) => {
-      const d = displayValue(k, v);
-      if (!Number.isFinite(d)) return '–';
-      const p = PARAMS[k];
-      const digits = Math.abs(d) >= 100 || p.unit === '°C' || p.unit === 'm' ? 0 : Math.abs(d) >= 10 ? 1 : 2;
-      return `${d.toFixed(digits)}${p.unit === '°C' || p.unit === '°' ? p.unit : ` ${p.unit}`}`;
-    };
+  function showComparison(i, res, site, found) {
+    const { relative = {}, targets = {} } = found;
+    const fmt = formatParam;
     const rows = Object.keys(res.values).map((k) => {
       const p = PARAMS[k];
-      let siteCell = p.site ? fmt(k, site[k]) : `<span class="note">${p.better === 'low' ? 'lower wins' : 'higher wins'}</span>`;
+      let siteCell = p.site ? formatSite(k, site[k]) : `<span class="note">${p.better === 'low' ? 'lower wins' : 'higher wins'}</span>`;
       if (k in relative) {
         // beyond Earth's range: matched to the same percentile of Earth
         const pct = Math.round(relative[k] * 100);
-        siteCell += `<br><span class="note" title="${pct}% of ${source.name} is below this value; matched to Earth's ${pct}th percentile">` +
-          `${pct}th pct → ${fmt(k, targets[k])} on Earth</span>`;
+        siteCell += `<br><span class="note" title="${pct}% of ${source.name} is below this value; matched to Earth's ${ordinal(pct)} percentile">` +
+          `${ordinal(pct)} pct → ${fmt(k, targets[k])} on Earth</span>`;
       }
       return `<tr><td>${p.name}</td><td>${siteCell}</td><td>${fmt(k, res.values[k])}</td></tr>`;
     });
     const box = $('analog-compare');
-    box.innerHTML = `<div class="analog-3d-row">
+    box.innerHTML = `<button type="button" class="primary analog-sim">🛠 Simulation Planning</button>
+      <div class="analog-3d-row">
         <button type="button" class="view-3d-btn analog-3d">Stand here in 3D &rarr;</button>
         <button type="button" class="view-3d-btn analog-terrain">⛰ 3D terrain</button>
       </div>
-      <p class="c-title">Area ${i + 1} compared with the site</p>
+      <div class="analog-drive">
+        <button type="button" class="view-3d-btn analog-route">🛣 ${params.has('src') ? 'Drive the same route here' : 'Drive across this area'} &rarr;</button>
+        <p class="sub">${params.has('src')
+    ? `Plans your ${source.name} route (same length, same traveller) in this area and compares the two.`
+    : `Plans a route across this area with a ${source.name} traveller and compares it with the same crossing of the site. Tip: plan a route on the ${source.name} map, then "Find Earth analogs for this route".`}</p>
+      </div>
+      <p class="c-title">Area ${i + 1}${res.country ? ` · ${res.country}` : ''} compared with the site</p>
       <table><thead><tr><th></th><th>${source.name}</th><th>Earth</th></tr></thead><tbody>${rows.join('')}</tbody></table>
       <p class="sub" style="margin-top:.4rem">Values beyond anything on Earth are matched relatively:
       as cold (or warm) for Earth as the site is for ${source.name}. Search values are averages over the area. The area summary
-      (top right) shows this Earth area's typical values from the map data.</p>`;
+      (top right) shows this Earth area's typical values from the map data.</p>
+      ${reportCardHtml({ from, worldName: source.name, res, site, found, weights })}`;
+    featuresNear(res.lat, res.lon, r).then((f) => {
+      const slot = box.querySelector('.rc-features-slot');
+      if (slot) slot.outerHTML = featuresHtml(f);
+    }).catch(() => {});
+    // Simulation Planning: what recreating the site's environment here would take (src/simplan/)
+    const simCtx = { from, worldName: source.name, siteName: formatLatLon(lat, lon), res, site, found, weights,
+      placeName: `Area ${i + 1}${res.country ? ` · ${res.country}` : ''}` };
+    box.querySelector('.analog-sim').onclick = () => simPanel().open(simCtx);
+    if (simPanelInstance?.isOpen()) simPanelInstance.update(simCtx); // follows the selected result
     // detailed 3D landscape of this area's centre, loaded only on request
+    // drive the site's route here: the planner opens with it, compared side by side
+    box.querySelector('.analog-route').onclick = (e) => {
+      e.currentTarget.disabled = true;
+      Promise.resolve(selection?.driveAt(res)).finally(() => { e.currentTarget.disabled = false; });
+    };
     box.querySelector('.analog-3d').onclick = () => {
       location.hash = `#/earth3d?lat=${res.lat.toFixed(5)}&lon=${res.lon.toFixed(5)}`;
     };
@@ -1102,6 +1486,9 @@ function showAnalogResults(params, selection) {
 // The last address of each Moon/Mars map, so switching back restores its view and selection.
 const lastPage = {};
 const ICONS = { earth: iconEarth, moon: iconMoon, mars: iconMars };
+// Earth view from the home page: Earth on its own (route equivalents on both Mars and the Moon)
+$('home-earth').querySelector('img').src = iconEarth;
+$('home-earth').onclick = () => { location.hash = '#/earth'; };
 
 function setUpWorldSwitch(key, params) {
   const btn = $('switch-world');
@@ -1130,10 +1517,16 @@ const appHooks = {
   bodyName: () => 'Mars',
 };
 
+const finderState = {}; // last 'Find sites' criteria per world, for this visit
+let simPanelInstance = null; // Simulation Planning panel (src/simplan/), made when first opened
+const simPanel = () => (simPanelInstance ??= createSimPanel());
+
 function hidePanels() {
   if (terrainView?.isOpen()) terrainView.close();
+  simPanelInstance?.close();
   $('btn-3d').hidden = true;
-  for (const id of ['select-panel', 'analog-banner', 'menu', 'menu-btn', 'area-panel', 'switch-world', 'ruler-panel', 'route-panel']) $(id).hidden = true;
+  for (const id of ['select-panel', 'analog-banner', 'menu', 'menu-btn', 'area-panel', 'switch-world', 'ruler-panel', 'route-panel', 'finder-btn']) $(id).hidden = true;
+  $('back-to-site').textContent = '← Back to this site';
   mapView.classList.remove('measuring');
   $('menu-btn').setAttribute('aria-expanded', false);
   $('select-hint').hidden = false;

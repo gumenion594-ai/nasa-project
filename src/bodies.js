@@ -11,6 +11,13 @@
 //   filter        - CSS filter, e.g. to tint or brighten a layer
 const TREK = 'https://trek.nasa.gov/tiles';
 const trek = (path, ext) => `${TREK}/${path}/1.0.0/default/default028mm/{z}/{y}/{x}.${ext}`;
+// Bundled whole-world layer under the NASA Trek imagery (tools/build_fallback_basemap.py): it
+// always loads, so a slow or missing Trek tile shows the shaded relief instead of a black square.
+const fallback = (body, attribution) => ({
+  url: `${import.meta.env.BASE_URL}basemap/${body}/{z}/{y}/{x}.jpg`,
+  attribution,
+  maxNativeZoom: 2, // ~5 km (Moon) / ~10 km (Mars) per pixel; enlarged beyond
+});
 
 export const BODIES = {
   earth: {
@@ -30,6 +37,7 @@ export const BODIES = {
     crs: 'EPSG4326', // NASA Trek tiles are equirectangular
     radiusKm: 1737.4,
     layers: [
+      fallback('moon', 'Relief: NASA LRO LOLA'),
       { // backup underneath, in case the sharper mosaic has a gap
         url: trek('Moon/EQ/LRO_WAC_Mosaic_Global_303ppd_v02', 'jpg'),
         attribution: 'LRO WAC &copy; NASA/GSFC/ASU',
@@ -51,6 +59,7 @@ export const BODIES = {
     crs: 'EPSG4326',
     radiusKm: 3389.5,
     layers: [
+      fallback('mars', 'Relief: NASA MGS MOLA'),
       { // colour of the whole planet
         url: trek('Mars/EQ/Mars_Viking_MDIM21_ClrMosaic_global_232m', 'jpg'),
         attribution: 'Viking MDIM 2.1 &copy; NASA/JPL/USGS',

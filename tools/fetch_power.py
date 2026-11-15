@@ -9,6 +9,8 @@ Each box is cached in data/raw/power/, so the script can be re-run to resume.
 (Surface, not air, temperature - comparable with the Moon and Mars surface maps.)
   PRECTOTCORR          precipitation (mm/day), per month
   ALLSKY_SFC_UV_INDEX  surface UV index (all-sky, daily mean), per month
+  ALLSKY_SFC_SW_DWN    sunlight reaching the ground (kWh/m2/day), per month
+  TS                   ground-surface temperature (deg C), per month and yearly mean
 
 Source: NASA Langley POWER project (MERRA-2 / CERES based), https://power.larc.nasa.gov
 """
@@ -21,7 +23,7 @@ import urllib.request
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, 'data', 'raw', 'power')
 API = 'https://power.larc.nasa.gov/api/temporal/climatology/regional'
-PARAMS = ['TS_MAX', 'TS_MIN', 'TS_RANGE', 'PRECTOTCORR', 'ALLSKY_SFC_UV_INDEX', 'ALLSKY_SFC_SW_DWN']
+PARAMS = ['TS_MAX', 'TS_MIN', 'TS_RANGE', 'PRECTOTCORR', 'ALLSKY_SFC_UV_INDEX', 'ALLSKY_SFC_SW_DWN', 'TS']
 
 
 def box(param, lat0, lon0):

@@ -30,6 +30,11 @@
         <img class="brand-logo" src="/favicon.svg" alt="" />
         <span>Planet Maps</span>
       </header>
+      <!-- Earth (top right): its own routes and places, and their Mars / Moon equivalents -->
+      <button id="home-earth" class="switch-world home-earth" type="button" aria-label="Earth view">
+        <img alt="" width="34" height="34" />
+        <span class="sw-text">Earth<span class="sw-long"> view</span></span>
+      </button>
       <h1>Choose a landing site</h1>
       <div class="bodies">
         <button class="body-btn" data-body="moon" aria-label="Open Moon map">
@@ -54,6 +59,7 @@
         <button id="back" class="map-btn">&larr; Home</button>
         <button id="menu-btn" class="map-btn" aria-expanded="false" aria-controls="menu" hidden>&#9776; View</button>
         <button id="ruler-btn" class="map-btn ruler-btn" aria-pressed="false" title="Measure distance"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="2.5" y="8" width="19" height="8" rx="1.5" transform="rotate(-35 12 12)"/><path d="M7.3 9.9l1.2 1.7M10 8l1.8 2.6M12.6 6.2l1.2 1.7M15.3 4.3l1.8 2.6" transform="translate(-1.2 3.2)"/></g></svg><span class="btn-label">Ruler</span></button>
+        <button id="finder-btn" class="map-btn ruler-btn finder-btn" title="Find landing sites by criteria" hidden><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.3 15.3L21 21" stroke-linecap="round"/><path d="M10.5 6.8v7.4M6.8 10.5h7.4" stroke-width="1.2"/></g></svg><span class="btn-label">Find sites</span></button>
         <button id="help-btn" class="map-btn help-btn" title="Tutorial" aria-label="Show the tutorial">?</button>
         <button id="btn-3d" class="map-btn" aria-pressed="false" hidden>⛰ 3D terrain</button>
       </div>
@@ -136,7 +142,22 @@
             <button id="find-similar">Find similar spots</button>
           </div>
           <button id="view-3d" class="view-3d-btn" hidden>Stand here in 3D &rarr;</button>
+          <!-- Earth: the reverse search, Earth place -> Mars / Moon spots (src/equivalents.js) -->
+          <div id="equiv" class="equiv" hidden>
+            <button id="find-equiv" class="primary" type="button">🪐 Find the Mars &amp; Moon equivalents</button>
+            <p id="equiv-status" class="sub" aria-live="polite"></p>
+            <div id="equiv-results"></div>
+          </div>
         </div>
+        <!-- Go to typed coordinates (parseLatLon in src/geo.js) -->
+        <form id="goto-form" class="goto" autocomplete="off" novalidate>
+          <label class="eyebrow" for="goto-input">Go to coordinates</label>
+          <div class="goto-row">
+            <input id="goto-input" type="text" spellcheck="false" placeholder="e.g. -4.59, 137.44" aria-describedby="goto-msg">
+            <button type="submit">Go</button>
+          </div>
+          <p id="goto-msg" class="sub goto-msg" aria-live="polite"></p>
+        </form>
         <div class="radius-row">
           <div class="radius-head">
             <label class="eyebrow" for="radius-slider">Radius</label>
@@ -147,10 +168,10 @@
         </div>
       </aside>
 
-      <!-- Mars route planner: A to B, shortest / easiest / safest (src/route/) -->
+      <!-- Route planner (Mars and Moon): A to B, shortest / easiest / safest (src/route/) -->
       <aside id="route-panel" class="panel route-panel" hidden aria-label="Route planner" aria-live="polite">
         <div class="panel-head">
-          <span class="eyebrow">Route planner · Mars</span>
+          <span class="eyebrow">Route planner · <span id="route-world">Mars</span></span>
           <button id="route-close" class="icon-btn" aria-label="Close route planner">&times;</button>
         </div>
         <p id="route-hint" class="hint"></p>
@@ -165,10 +186,26 @@
           <span class="eyebrow">Who travels</span>
           <div id="route-traveller" class="traveller-grid" role="radiogroup" aria-label="Who travels"></div>
           <div id="route-rover" class="route-rover"></div>
+          <details class="route-settings">
+            <summary>Route settings <span class="sub">(efficient route)</span></summary>
+            <label class="rs-row"><span>Rover: max slope</span><input id="rs-rover" type="range" min="10" max="30" step="1"><output></output></label>
+            <label class="rs-row"><span>On foot: max slope</span><input id="rs-foot" type="range" min="10" max="25" step="1"><output></output></label>
+            <span class="eyebrow">Climbing penalty</span>
+            <div id="rs-kup" class="chips" role="radiogroup" aria-label="Climbing penalty"></div>
+            <span class="eyebrow">Small adjustments (together at most +25%)</span>
+            <label class="rs-row"><span>Deep dust</span><input id="rs-dust" type="range" min="0" max="2" step="0.5"><output></output></label>
+            <label class="rs-row"><span>Boulder fields</span><input id="rs-rock" type="range" min="0" max="2" step="0.5"><output></output></label>
+            <label class="rs-row"><span>Cold nights</span><input id="rs-cold" type="range" min="0" max="2" step="0.5"><output></output></label>
+            <p class="sub">A rover route is tried first, then on foot; if neither fits the limits: "Path unavailable".
+              Climbing penalty: climbing 1 m counts like driving this many metres on the flat.</p>
+            <button id="rs-reset" type="button">Reset to defaults</button>
+          </details>
         </div>
         <p id="route-status" class="sub route-status"></p>
+        <p id="route-precise-note" class="verdict route-precise-note" hidden></p>
         <div id="route-results" hidden>
           <div id="route-tabs" class="route-tabs"></div>
+          <div id="route-compare" class="route-compare" hidden></div>
           <p id="route-about" class="sub route-about"></p>
           <div id="route-explain" class="route-explain"></div>
           <div id="route-stats"></div>
@@ -177,15 +214,27 @@
           <span class="eyebrow">Dangers on the way</span>
           <ol id="route-dangers" class="route-dangers"></ol>
           <p id="route-no-dangers" class="sub" hidden>No major hazards found at this map scale.</p>
-          <p class="route-note">Measured = spacecraft data (MOLA, TES); catalog = Robbins crater database;
+          <p id="route-note" class="route-note">Measured = spacecraft data (MOLA, TES); catalog = Robbins crater database;
             observed = dust storms mapped from orbit (MDAD); model / estimate = calculated here from assumptions
             (rover limits and weights: src/route/rovers.js). The data is 2–300 km per pixel,
             so this compares corridors; it can't see single boulders or small cliffs.</p>
         </div>
+        <p id="route-edge-note" class="sub route-edge-note" hidden>This route crosses the 180° line, where the flat map
+          ends, so part of it appears at the opposite edge. Switch to a polar view (☰ View) to see it in one piece.</p>
         <div class="actions">
+          <button id="route-zoom" type="button" hidden title="Frame the whole route on screen">⤢ Zoom to route</button>
           <button id="route-swap" type="button">⇅ Swap A and B</button>
           <button id="route-clear" type="button">Start over</button>
         </div>
+        <!-- Earth: the Mars / Moon equivalent of this route (one button per world the page allows) -->
+        <div id="route-eq" class="route-eq" hidden>
+          <button id="route-eq-mars" type="button" class="route-analogs-btn">🔴 Find the Mars equivalent of this route</button>
+          <button id="route-eq-moon" type="button" class="route-analogs-btn">🌕 Find the Moon equivalent of this route</button>
+          <p id="route-eq-status" class="sub" aria-live="polite"></p>
+        </div>
+        <button id="route-analogs" type="button" class="route-analogs-btn" hidden
+          title="Find places on another world like this route's area, then drive the same route there">🌍 Find Earth analogs for this route</button>
+        <div id="route-equiv" class="route-equiv equiv" aria-live="polite"></div>
       </aside>
 
       <!-- Typical values of every characteristic over the selected area -->
@@ -219,6 +268,17 @@
           <button id="back-to-site">&larr; Back to this site</button>
           <button id="exit-results">Exit results</button>
         </div>
+      </aside>
+
+      <!-- Simulation Planning for the selected Earth analog (src/simplan) -->
+      <aside id="sim-panel" class="panel sim-panel" hidden aria-label="Simulation planning">
+        <div class="panel-head sim-head">
+          <span class="eyebrow">Simulation planning</span>
+          <button id="sim-close" class="icon-btn" aria-label="Close simulation planning">&times;</button>
+        </div>
+        <p id="sim-sub" class="coords sim-sub"></p>
+        <p class="sub">What it would take to recreate the site’s environment here: gaps, equipment, cost and people.</p>
+        <div id="sim-body"></div>
       </aside>
     </section>
 
@@ -272,6 +332,25 @@
         <input id="w-count-input" type="number" step="1" inputmode="numeric">
         <span class="w-count-help"></span>
       </div>
+      <div class="w-countries" role="group" aria-label="Country filter" hidden>
+        <div class="w-c-row">
+          <span class="w-c-label">Countries</span>
+          <div class="w-c-modes" role="radiogroup" aria-label="Country filter">
+            <button type="button" role="radio" data-mode="any">Anywhere</button>
+            <button type="button" role="radio" data-mode="avoid">Avoid…</button>
+            <button type="button" role="radio" data-mode="only">Only in…</button>
+          </div>
+        </div>
+        <div class="w-c-pick" hidden>
+          <div class="w-c-chosen" aria-live="polite"></div>
+          <input class="w-c-search" type="search" placeholder="Search countries…" aria-label="Search countries">
+          <div class="w-c-list" role="group" aria-label="Countries"></div>
+        </div>
+      </div>
+      <label class="w-toggle" hidden>
+        <input type="checkbox">
+        <span><span class="w-toggle-label"></span><small class="w-toggle-help"></small></span>
+      </label>
       <div class="w-list"></div>
       <p class="w-warning" role="alert" hidden>Turn on at least one characteristic to continue.</p>
       <footer>
@@ -282,6 +361,36 @@
         <div class="w-actions">
           <button type="button" class="w-cancel">Cancel</button>
           <button type="button" class="w-go primary"></button>
+        </div>
+      </footer>
+    </dialog>
+
+    <!-- 'Find sites' on the Moon / Mars: criteria for a whole-world search (src/finderDialog.js) -->
+    <dialog id="finder" class="weights finder" aria-labelledby="f-heading">
+      <header>
+        <h2 id="f-heading">Find sites by criteria</h2>
+        <p class="w-subheading f-sub"></p>
+        <p class="w-help">Searches the whole surface for areas that meet all your limits, then ranks them by your
+          preferences (with none, by how comfortably they meet the limits). Start from a preset or set your own: tick a
+          characteristic, give it a range (either end can be left open) and/or say whether lower or higher is better.
+          Importance sets how much a preference counts in the ranking.</p>
+      </header>
+      <div class="f-preset-box">
+        <span class="f-p-label">Presets</span>
+        <div class="f-presets w-mode-buttons" role="group" aria-label="Presets"></div>
+        <p class="f-preset-help w-mode-help"></p>
+      </div>
+      <div class="w-count">
+        <label for="f-count">Number of sites to find</label>
+        <input id="f-count" type="number" step="1" inputmode="numeric">
+      </div>
+      <div class="f-list"></div>
+      <p class="f-warning w-warning" role="alert" hidden></p>
+      <footer>
+        <div class="w-presets"><button type="button" class="f-clear">Clear all</button></div>
+        <div class="w-actions">
+          <button type="button" class="f-cancel">Cancel</button>
+          <button type="button" class="f-go primary">Find sites →</button>
         </div>
       </footer>
     </dialog>
