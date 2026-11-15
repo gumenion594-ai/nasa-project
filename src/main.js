@@ -2,7 +2,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './style.css';
 import { BODIES } from './bodies.js';
-import { circlePoints, formatLatLon } from './geo.js';
+import { circlePoints, formatLatLon, parseLatLon } from './geo.js';
 import { createGlobe, globesReady } from './globes.js';
 import { drawStarfield } from './starfield.js';
 import { VIEWS, loadIndex, createOverlay, legendHtml, levelColour, retryFailedTiles } from './overlays.js';
@@ -643,6 +643,8 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
     $('select-hint').hidden = true;
     $('select-info').hidden = false;
     $('select-coords').textContent = formatLatLon(lat, lon);
+    $('goto-msg').textContent = ''; // a new selection replaces any "Go to coordinates" message
+    $('goto-form').classList.remove('bad');
     draw(opts);
     saveToUrl();
     updateSummary();
@@ -711,6 +713,31 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
     select(e.latlng.lat, e.latlng.lng);
   });
   $('clear-selection').onclick = clear;
+
+  // ---- Go to typed coordinates: selects the area there, as a click would
+  const gotoMsg = (text, bad = false) => {
+    $('goto-msg').textContent = text;
+    $('goto-form').classList.toggle('bad', bad);
+  };
+  $('goto-input').value = '';
+  $('goto-input').title = key === 'earth'
+    ? 'Latitude, longitude in degrees (south and west negative), or with N/S/E/W'
+    : 'Latitude, longitude in degrees: planetocentric, east longitude (south and west negative, or 0–360° E), or with N/S/E/W';
+  gotoMsg('');
+  $('goto-input').oninput = () => gotoMsg('');
+  $('goto-form').onsubmit = (e) => {
+    e.preventDefault();
+    const p = parseLatLon($('goto-input').value);
+    if (p.error) { gotoMsg(p.error, true); return; }
+    // e.g. the Mercator map stops short of the poles
+    const maxLat = proj.bounds ? L.latLngBounds(proj.bounds).getNorth() : 90;
+    if (Math.abs(p.lat) > maxLat) {
+      gotoMsg(`This map only reaches ${Math.floor(maxLat)}° ${p.lat > 0 ? 'N' : 'S'}.${key === 'earth' ? '' : ' Switch to a polar map in “View”.'}`, true);
+      return;
+    }
+    select(p.lat, p.lon, { fit: 'always' });
+    gotoMsg(`Selected ${formatLatLon(p.lat, p.lon)}.`);
+  };
 
   // Is a screen point on the selected area? (Tiny areas count within ~14 px of their centre,
   // so they can be clicked again even when the map is zoomed far out.)

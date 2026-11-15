@@ -203,6 +203,17 @@ html, body { margin: 0; height: 100%; background: #000; color: #eee;
 /* ---- Radius (selection panel) ---- */
 .radius-row { margin-top: .75rem; padding-top: .65rem; border-top: 1px solid #333; }
 .radius-row .eyebrow { display: block; }
+/* Go to coordinates */
+.goto { margin-top: .75rem; padding-top: .65rem; border-top: 1px solid #333; }
+.goto .eyebrow { display: block; }
+.goto-row { display: flex; gap: .4rem; margin-top: .35rem; }
+.goto-row input { flex: 1; min-width: 0; font: inherit; font-size: 1rem; padding: .4rem .55rem; border-radius: 6px;
+  border: 1px solid #555; background: #1c1c22; color: #fff; }
+.goto-row input:focus { outline: 2px solid #8ab4ff; outline-offset: 0; }
+.goto.bad .goto-row input { border-color: #fc6; }
+.goto-msg { margin: .3rem 0 0; font-size: .78rem; }
+.goto-msg:empty { display: none; }
+.goto.bad .goto-msg { color: #fc6; }
 .legend, .zoom-readout, .map-settings { box-sizing: border-box; }
 
 /* ---- Area summary ---- */
