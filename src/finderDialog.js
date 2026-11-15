@@ -1,4 +1,4 @@
-// The "Find sites" dialog: which criteria a Moon / Mars site has to meet. Each data layer (and
+// The "Find sites" dialog: which criteria an Earth, Moon, or Mars site has to meet. Each data layer (and
 // latitude) can be switched on with limits (min / max in its own units), a preference (lower
 // or higher is better) and an importance. Presets fill in a typical set, which can be changed.
 import { VIEWS } from './overlays.js';
@@ -40,7 +40,7 @@ export const PRESETS = {
 };
 
 /**
- * Show the dialog. body: 'moon'|'mars'; bodyName; layers: {layer: meta} (index.json);
+ * Show the dialog. body: 'earth'|'moon'|'mars'; bodyName; layers: {layer: meta} (index.json);
  * initial: { criteria, count, preset } from the last search. Resolves with the same shape, or null.
  */
 export function askCriteria({ body, bodyName, layers, radiusKm, initial = {} }) {
@@ -60,6 +60,8 @@ export function askCriteria({ body, bodyName, layers, radiusKm, initial = {} }) 
   if (!initial.criteria && presets[0]) preset = presets[0].id;
 
   dialog.querySelector('.f-sub').textContent = `${bodyName} · the whole surface · areas of ${radiusKm} km radius (the radius slider sets it)`;
+  const presetContainer = dialog.querySelector('.f-preset-box');
+  presetContainer.hidden = !presets.length;
   const presetBox = dialog.querySelector('.f-presets');
   const presetHelp = dialog.querySelector('.f-preset-help');
   const list = dialog.querySelector('.f-list');

@@ -1,4 +1,4 @@
-// "Find sites": search a whole world (Moon or Mars) for areas that meet a set of criteria,
+// "Find sites": search a whole world (Earth, Moon, or Mars) for areas that meet a set of criteria,
 // instead of clicking one. A criterion is a data layer (or latitude) with optional limits
 // (min / max, in the layer's own units), an optional preference (lower or higher is better)
 // and an importance.

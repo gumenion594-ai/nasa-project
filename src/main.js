@@ -779,6 +779,8 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
       gotoMsg(`This map only reaches ${Math.floor(maxLat)}° ${p.lat > 0 ? 'N' : 'S'}.${key === 'earth' ? '' : ' Switch to a polar map in “View”.'}`, true);
       return;
     }
+    if (similarShown) exitSimilar();
+    if ($('finder').open) $('finder').querySelector('.f-cancel').click();
     select(p.lat, p.lon, { fit: 'always' });
     gotoMsg(`Selected ${formatLatLon(p.lat, p.lon)}.`);
   };
@@ -1004,7 +1006,7 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
   }
 
   // ---- 'Find sites': search the whole world by criteria instead of clicking (src/sitefinder.js)
-  const finderWorld = key === 'mars' || key === 'moon';
+  const finderWorld = body.selectable && !analog;
   $('finder-btn').hidden = !finderWorld;
   $('finder-btn').onclick = async () => {
     if (!finderWorld || !Object.keys(available).length) return;
@@ -1097,9 +1099,11 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
         <button type="button" class="view-3d-btn finder-select">Select this site &rarr;</button>`;
       box.querySelector('.finder-select').onclick = () => { exitSimilar(); select(res.lat, res.lon, { fit: 'always' }); };
       box.hidden = false;
-      $('results-analogs').textContent = `Find Earth analogs for site ${i + 1}`;
-      $('results-analogs').onclick = () => findEarthAnalogs(res);
-      $('results-analogs').hidden = false;
+      if (key !== 'earth') {
+        $('results-analogs').textContent = `Find Earth analogs for site ${i + 1}`;
+        $('results-analogs').onclick = () => findEarthAnalogs(res);
+        $('results-analogs').hidden = false;
+      }
     }
   }
 

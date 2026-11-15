@@ -123,7 +123,7 @@ export const LANDMARKS = {
     ['Transantarctic Mountains', -80, 160, 'range', 1],
     ['Tibetan Plateau', 33, 88, 'range', 1, 'Highest and largest plateau on Earth'],
     // Deserts
-    ['Sahara Desert', 23, 12, 'desert', 0, 'Largest hot desert'],
+    ['Sahara Desert', 23, 12, 'desert', 1, 'Largest hot desert'],
     ['Arabian Desert', 22, 47, 'desert', 1],
     ['Gobi Desert', 43, 105, 'desert', 1],
     ['Taklamakan Desert', 38.8, 83, 'desert', 1],

@@ -149,15 +149,6 @@
             <div id="equiv-results"></div>
           </div>
         </div>
-        <!-- Go to typed coordinates (parseLatLon in src/geo.js) -->
-        <form id="goto-form" class="goto" autocomplete="off" novalidate>
-          <label class="eyebrow" for="goto-input">Go to coordinates</label>
-          <div class="goto-row">
-            <input id="goto-input" type="text" spellcheck="false" placeholder="e.g. -4.59, 137.44" aria-describedby="goto-msg">
-            <button type="submit">Go</button>
-          </div>
-          <p id="goto-msg" class="sub goto-msg" aria-live="polite"></p>
-        </form>
         <div class="radius-row">
           <div class="radius-head">
             <label class="eyebrow" for="radius-slider">Radius</label>
@@ -365,13 +356,22 @@
       </footer>
     </dialog>
 
-    <!-- 'Find sites' on the Moon / Mars: criteria for a whole-world search (src/finderDialog.js) -->
+    <!-- 'Find sites': coordinate entry and criteria for a whole-world search -->
     <dialog id="finder" class="weights finder" aria-labelledby="f-heading">
+      <form id="goto-form" class="goto" autocomplete="off" novalidate>
+        <label class="eyebrow" for="goto-input">Go to coordinates</label>
+        <div class="goto-row">
+          <input id="goto-input" type="text" spellcheck="false" placeholder="e.g. -4.59, 137.44" aria-describedby="goto-msg">
+          <button type="submit">Go</button>
+        </div>
+        <p id="goto-msg" class="sub goto-msg" aria-live="polite"></p>
+      </form>
       <header>
         <h2 id="f-heading">Find sites by criteria</h2>
         <p class="w-subheading f-sub"></p>
         <p class="w-help">Searches the whole surface for areas that meet all your limits, then ranks them by your
-          preferences (with none, by how comfortably they meet the limits). Start from a preset or set your own: tick a
+          preferences (with none, by how comfortably they meet the limits). Where available, start from a preset;
+          otherwise set your own: tick a
           characteristic, give it a range (either end can be left open) and/or say whether lower or higher is better.
           Importance sets how much a preference counts in the ranking.</p>
       </header>
