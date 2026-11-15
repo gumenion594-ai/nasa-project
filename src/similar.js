@@ -285,3 +285,73 @@ export async function findSimilar({ body, sphereKm, layers, weights, site, radiu
     skipped,
   };
 }
+
+// ---- Earth -> Moon / Mars: the places on a world most like given target values -------------
+
+/** A value in a layer's units -> its 0..1 tile code scale (the inverse of decode). */
+function encodeT(meta, v) {
+  const lo = meta.enc_min ?? meta.min;
+  const hi = meta.enc_max ?? meta.max;
+  if (meta.log) return (Math.log10(Math.max(v, 1e-9)) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo));
+  return (v - lo) / (hi - lo);
+}
+
+/**
+ * The spots on `body` most like a place elsewhere (an Earth site), compared like with like:
+ * every spot's values are circle means of `radiusKm`, as in findSimilar.
+ *   targets: {layer: { value, pct }}: the place's value in the layer's units, and its percentile
+ *     (0..1, by area) on its own world. A value beyond anything on `body` (Earth is far warmer
+ *     than Mars at night) is matched relatively: to `body`'s value at the same percentile.
+ *     always: layers matched by value only (slope, relief).
+ * Resolves to { results: [{lat, lon, score, values}], used, targets: {layer: value}, relative: {layer: pct} }.
+ */
+export async function findMatches({ body, sphereKm, layers, weights, targets, always = [], radiusKm, count = DEFAULT_COUNT, onProgress }) {
+  const wanted = Object.keys(weights).filter((k) => weights[k] > 0 && layers[k] && targets[k] && Number.isFinite(targets[k].value));
+  onProgress?.(`Loading the ${body === 'moon' ? 'Moon' : 'Mars'} data…`);
+  const raw = await Promise.all(wanted.map((k) => layerGrid(body, k, layers[k])));
+  const shapeOf = circleShape(radiusKm / sphereKm);
+  const used = []; const means = {}; const spreads = {}; const goal = {}; const relative = {};
+  for (let i = 0; i < wanted.length; i++) {
+    const k = wanted[i];
+    onProgress?.(`Comparing every area of the ${body === 'moon' ? 'Moon' : 'Mars'}… (${i + 1}/${wanted.length})`);
+    await nextFrame();
+    const m = circleMeans(raw[i], shapeOf);
+    const [lo, p5, p95, hi] = areaQuantiles(m, [0.001, 0.05, 0.95, 0.999]);
+    const t = encodeT(layers[k], targets[k].value);
+    if (always.includes(k) || (t >= lo && t <= hi)) goal[k] = Math.min(1, Math.max(0, t));
+    else {
+      const pct = Math.min(1, Math.max(0, targets[k].pct ?? (t < lo ? 0 : 1)));
+      [goal[k]] = areaQuantiles(m, [Math.min(0.999, Math.max(0.001, pct))]);
+      relative[k] = pct;
+    }
+    used.push(k); means[k] = m; spreads[k] = Math.max(1e-3, p95 - p5);
+  }
+  if (!used.length) return { results: [], used, targets: {}, relative };
+  onProgress?.('Ranking…');
+  await nextFrame();
+  const totalW = used.reduce((a, k) => a + weights[k], 0);
+  const scores = new Float32Array(W * H).fill(Infinity);
+  for (let j = 0; j < W * H; j++) {
+    let s = 0; let ok = true;
+    for (const k of used) {
+      const v = means[k][j];
+      if (v !== v) { ok = false; break; }
+      const d = (v - goal[k]) / spreads[k];
+      s += weights[k] * d * d;
+    }
+    if (ok) scores[j] = Math.sqrt(s / totalW);
+  }
+  const order = [];
+  for (let j = 0; j < scores.length; j++) if (scores[j] !== Infinity) order.push(j);
+  order.sort((a, b) => scores[a] - scores[b]);
+  const toValue = (k, t) => decode(layers[k], 1 + t * 254);
+  const results = [];
+  for (const j of order) {
+    const lat = rowLat(Math.floor(j / W));
+    const lon = colLon(j % W);
+    if (results.some((p) => distanceKm(sphereKm, p.lat, p.lon, lat, lon) < MIN_DISTANCE_KM)) continue;
+    results.push({ lat, lon, score: scores[j], values: Object.fromEntries(used.map((k) => [k, toValue(k, means[k][j])])) });
+    if (results.length === count) break;
+  }
+  return { results, used, targets: Object.fromEntries(used.map((k) => [k, toValue(k, goal[k])])), relative };
+}

@@ -430,3 +430,85 @@ export function parseAnalogWeights(text) {
   }
   return out;
 }
+
+// ---- Earth -> Moon / Mars: an Earth place's own values --------------------------------------
+
+const EARTH_FIELDS = ['tmax', 'tmin', 'swing', 'logslope', 'relief', 'dry'];
+let earthRanks = null; // field -> { v: sorted values, w: cumulative land area }
+async function earthDistributions() {
+  if (earthRanks) return earthRanks;
+  const g = await loadEarthGrid();
+  earthRanks = {};
+  for (const f of EARTH_FIELDS) {
+    const items = [];
+    for (const c of g.idx) {
+      const v = g.dense[f][c];
+      if (!Number.isFinite(v)) continue;
+      const row = Math.floor(c / g.width);
+      items.push([v, Math.cos(rad(90 - (row + 0.5) * g.res)) * (g.dense.land[c] || 0)]);
+    }
+    items.sort((a, b) => a[0] - b[0]);
+    const w = new Float64Array(items.length);
+    let acc = 0;
+    items.forEach(([, x], i) => { acc += x; w[i] = acc; });
+    earthRanks[f] = { v: Float64Array.from(items, (x) => x[0]), w, total: acc };
+  }
+  return earthRanks;
+}
+
+/**
+ * The characteristics an Earth place shares with the Moon / Mars maps, averaged over the land
+ * within `radiusKm` (the cell itself for small circles), and where each ranks on Earth's land
+ * (0..1, by area). Resolves to null for a place with no land data (open sea, ice sheets).
+ *   { tmax, tmin, swing (°C), slope (°), relief (km), land, pct: {...} }
+ */
+export async function earthPlace(lat, lon, radiusKm) {
+  const g = await loadEarthGrid();
+  const [dist] = await Promise.all([earthDistributions()]);
+  const { width: W, height: H, res, dense } = g;
+  const cellKm = rad(res) * EARTH_R;
+  const row0 = Math.min(H - 1, Math.max(0, Math.floor((90 - lat) / res)));
+  const col0 = ((Math.floor((lon + 180) / res) % W) + W) % W;
+  const dRows = Math.max(0, Math.ceil(radiusKm / cellKm));
+  const sums = Object.fromEntries(EARTH_FIELDS.map((f) => [f, 0]));
+  let wLand = 0; let wAll = 0;
+  for (let r = Math.max(0, row0 - dRows); r <= Math.min(H - 1, row0 + dRows); r++) {
+    const la = 90 - (r + 0.5) * res;
+    const cos = Math.cos(rad(la));
+    const dCols = Math.min(W / 2, Math.ceil(dRows / Math.max(0.05, cos)));
+    for (let dc = -dCols; dc <= dCols; dc++) {
+      const c = (((col0 + dc) % W) + W) % W;
+      const lo = -180 + (c + 0.5) * res;
+      const own = r === row0 && c === col0;
+      if (!own && distanceKm(lat, lon, la, lo) > Math.max(radiusKm, cellKm / 2)) continue;
+      wAll += cos;
+      const k = r * W + c;
+      const land = dense.land[k];
+      if (!(land > 0) || EARTH_FIELDS.some((f) => !Number.isFinite(dense[f][k]))) continue;
+      const w = cos * land;
+      wLand += w;
+      for (const f of EARTH_FIELDS) sums[f] += w * dense[f][k];
+    }
+  }
+  if (!(wLand > 0)) return null;
+  const mean = Object.fromEntries(EARTH_FIELDS.map((f) => [f, sums[f] / wLand]));
+  const rank = (f, v) => {
+    const { v: vs, w, total } = dist[f];
+    let lo = 0; let hi = vs.length - 1;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (vs[m] < v) lo = m + 1; else hi = m; }
+    return total > 0 ? w[lo] / total : 0.5;
+  };
+  // dryness (stored as log10 of rain in mm + 1): how much wetter than a desert (under 250 mm a
+  // year) this place is, in units of Earth's spread; 0 for any desert. Moon and Mars are bone dry.
+  const d = dist.dry;
+  const q = (p) => { let i = 0; while (i < d.w.length - 1 && d.w[i] < p * d.total) i++; return d.v[i]; };
+  const wetness = Math.max(0, mean.dry - PARAMS.dry.limit) / Math.max(1e-6, q(0.95) - q(0.05));
+  return {
+    tmax: mean.tmax, tmin: mean.tmin, swing: mean.swing,
+    slope: 10 ** mean.logslope, relief: mean.relief,
+    rainMm: 10 ** mean.dry - 1, wetness,
+    land: wLand / wAll,
+    pct: { tmax: rank('tmax', mean.tmax), tmin: rank('tmin', mean.tmin), swing: rank('swing', mean.swing),
+      slope: rank('logslope', mean.logslope), relief: rank('relief', mean.relief) },
+  };
+}

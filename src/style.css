@@ -543,6 +543,69 @@ body.in-3d #ruler-btn, body.in-3d #finder-btn, body.in-3d #help-btn, body.in-3d 
 .rv-card .rv-model { margin-top: .5rem !important; }
 .route-ab .ab-line { display: block; white-space: nowrap; font-size: .84rem; }
 .season-pick select { min-width: 7.2rem; }
+/* zoom to route: direction arrows, clearer A / B pins */
+.route-arrow { display: block; width: 14px; height: 14px; line-height: 14px; text-align: center; font-size: 11px; color: #fff;
+  text-shadow: 0 0 3px #000, 0 0 2px #000; pointer-events: none; }
+.leaflet-marker-icon .route-pin { width: 28px; height: 28px; font-size: .85rem; box-shadow: 0 0 0 3px rgba(0,0,0,.55), 0 2px 6px rgba(0,0,0,.6); }
+.route-edge-note { margin-top: .5rem !important; color: #ffcf6e; }
+.panel .actions #route-zoom { flex: 1.2; }
+@media (max-width: 600px) {
+  #btn-3d .long { display: none; }
+  .top-buttons { gap: 6px; }
+  .top-buttons .map-btn { padding: .6rem .8rem; }
+}
+/* route settings (efficient route) */
+.route-settings { margin: .3rem 0 .2rem; font-size: .8rem; }
+.route-settings summary { cursor: pointer; color: #7fd4ff; padding: .2rem 0; }
+.route-settings .eyebrow { display: block; margin-top: .45rem; }
+.rs-row { display: grid; grid-template-columns: 8.5rem 1fr 2.6rem; align-items: center; gap: .5rem; margin-top: .3rem; }
+.rs-row input { width: 100%; accent-color: #7fd4ff; }
+.rs-row output { text-align: right; font-variant-numeric: tabular-nums; color: #fff; }
+.route-settings .sub { margin-top: .4rem !important; line-height: 1.4; }
+.route-settings button { margin-top: .4rem; }
+.route-precise-note { margin-top: .5rem !important; }
+.danger-blocked { border-color: #e5484d; font-size: 14px; }
+/* Earth analogs: drive the site's route here, compared side by side */
+.analog-drive { margin: .5rem 0 .2rem; }
+.analog-drive .sub { margin-top: .3rem; line-height: 1.35; }
+.route-analogs-btn { width: 100%; margin-top: .5rem; }
+.route-compare { margin: .5rem 0 .6rem; padding: .55rem .6rem; border: 1px solid rgba(127, 212, 255, .35); border-radius: 8px; background: rgba(127, 212, 255, .06); }
+.route-compare .cmp-conclusion { margin: .3rem 0 .45rem; font-weight: 600; line-height: 1.35; color: #fff; }
+.route-compare .cmp-table th:not(:first-child), .route-compare .cmp-table td:not(:first-child) { text-align: right; white-space: nowrap; }
+.route-compare .cmp-table th { font-size: .72rem; color: #aaa; font-weight: 500; text-align: left; }
+.route-compare .cmp-note { margin-top: .45rem; line-height: 1.4; }
+@media (max-width: 600px) {
+  .map-view:has(#route-panel:not([hidden])) #analog-banner { display: none; }
+}
+.route-compare .cmp-table { table-layout: fixed; }
+.route-compare .cmp-table th:first-child, .route-compare .cmp-table td:first-child { width: 44%; white-space: normal; }
+.route-compare .cmp-table td:first-child .sub { display: block; font-size: .68rem; }
+.route-compare .cmp-table td:not(:first-child) { white-space: normal; }
+/* Earth -> Mars / Moon equivalents (src/equivalents.js) */
+.equiv { margin-top: .6rem; }
+.equiv #find-equiv { width: 100%; }
+.equiv #equiv-status { margin-top: .4rem; }
+.equiv-world { margin-top: .5rem; padding: .5rem .55rem; border: 1px solid #2f2f37; border-radius: 8px; }
+.equiv-world.far { border-style: dashed; }
+.equiv-head { display: flex; justify-content: space-between; align-items: center; margin: 0; }
+.equiv-badge { font-size: .75rem; padding: .1rem .45rem; border-radius: 999px; }
+.equiv-badge.ok { background: rgba(76, 211, 135, .18); color: #7fe3a8; }
+.equiv-badge.far { background: rgba(255, 176, 46, .16); color: #ffc46b; }
+.equiv-world > .sub { margin: .25rem 0 .3rem; line-height: 1.35; }
+.equiv-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .25rem; }
+.equiv-list button { width: 100%; display: flex; justify-content: space-between; gap: .5rem; text-align: left; font-size: .8rem; padding: .3rem .45rem; }
+.equiv-list .sim { color: #7fd4ff; font-variant-numeric: tabular-nums; }
+.equiv-compare { margin-top: .35rem; font-size: .78rem; }
+.equiv-compare summary { cursor: pointer; color: #7fd4ff; }
+.equiv-compare table { width: 100%; border-collapse: collapse; margin-top: .3rem; }
+.equiv-compare td, .equiv-compare th { padding: .18rem .2rem; border-bottom: 1px solid #2a2a30; text-align: right; }
+.equiv-compare td:first-child, .equiv-compare th:first-child { text-align: left; color: #aaa; }
+.equiv #equiv-results { max-height: min(42vh, 380px); overflow-y: auto; padding-right: 2px; }
+
+/* Earth view button on the home page (top right, like the one on the maps) */
+#home-earth { position: fixed; top: 12px; right: 12px; left: auto; z-index: 5; }
+.route-eq { margin-top: .5rem; display: grid; gap: .35rem; }
+.route-eq .route-analogs-btn { margin-top: 0; }
 
 /* ---- Country filter (analog search dialog) and country names in the results ---- */
 .w-countries { padding: .1rem 1.5rem .5rem; }

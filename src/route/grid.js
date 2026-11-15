@@ -9,7 +9,8 @@ const BASE = import.meta.env.BASE_URL;
 export const MARS_R = 3389.5;
 export const MOON_R = 1737.4;
 /** Mean radius (km) of the worlds the planner works on. */
-export const RADIUS = { mars: MARS_R, moon: MOON_R };
+export const EARTH_R = 6371.0;
+export const RADIUS = { mars: MARS_R, moon: MOON_R, earth: EARTH_R };
 const rad = (d) => (d * Math.PI) / 180;
 const deg = (r) => (r * 180) / Math.PI;
 
@@ -42,13 +43,26 @@ function tilePixels(url) {
   return tileCache.get(url);
 }
 
-/** Reads one layer's values (in real units) at its most detailed tile level. */
+const MERC_LAT = 85.0511;
+/**
+ * Reads one layer's values (in real units) at its most detailed tile level. Moon and Mars tiles
+ * are equirectangular (2:1 levels); Earth's are Web Mercator (square levels, ocean transparent,
+ * all-ocean tiles missing).
+ */
 export async function layerSampler(layer, meta, latMin, latMax, lonMin, lonMax, zoom = meta.max_zoom, world = 'mars') {
   const z = Math.min(meta.max_zoom, zoom); // a coarser level reads fewer tiles for big areas
-  const W = 512 * 2 ** z;
+  const merc = meta.crs === 'EPSG3857';
+  const W = (merc ? 256 : 512) * 2 ** z;
   const H = 256 * 2 ** z;
-  const r0 = Math.max(0, Math.floor(((90 - latMax) / 180) * H));
-  const r1 = Math.min(H - 1, Math.floor(((90 - latMin) / 180) * H));
+  // fractional pixel row of a latitude
+  const yOf = merc
+    ? (lat) => {
+      const p = rad(Math.max(-MERC_LAT, Math.min(MERC_LAT, lat)));
+      return ((1 - Math.log(Math.tan(Math.PI / 4 + p / 2)) / Math.PI) / 2) * H;
+    }
+    : (lat) => ((90 - lat) / 180) * H;
+  const r0 = Math.max(0, Math.floor(yOf(latMax)));
+  const r1 = Math.min(H - 1, Math.floor(yOf(latMin)));
   const c0 = Math.floor(((lonMin + 180) / 360) * W);
   const c1 = Math.floor(((lonMax + 180) / 360) * W);
   const tiles = new Map();
@@ -73,7 +87,7 @@ export async function layerSampler(layer, meta, latMin, latMax, lonMin, lonMax, 
     /** value at a point, or NaN where there's no data */
     at(lat, lon) {
       if (lat < latLo || lat > latHi) return NaN;
-      const row = Math.min(H - 1, Math.max(0, Math.floor(((90 - lat) / 180) * H)));
+      const row = Math.min(H - 1, Math.max(0, Math.floor(yOf(lat))));
       const col = ((Math.floor(((lon + 180) / 360) * W) % W) + W) % W;
       const px = tiles.get(`${row >> 8}/${col >> 8}`);
       if (!px) return NaN;
@@ -83,7 +97,7 @@ export async function layerSampler(layer, meta, latMin, latMax, lonMin, lonMax, 
     /** value at a point, interpolated between the 4 nearest data pixels (NaN where none) */
     smooth(lat, lon) {
       if (lat < latLo || lat > latHi) return NaN;
-      const fy = Math.min(H - 1, Math.max(0, ((90 - lat) / 180) * H - 0.5));
+      const fy = Math.min(H - 1, Math.max(0, yOf(lat) - 0.5));
       const fx = ((lon + 180) / 360) * W - 0.5;
       const r0 = Math.floor(fy); const c0 = Math.floor(fx);
       const ty = fy - r0; const tx = fx - c0;
@@ -190,11 +204,11 @@ export async function stormGrid(season) {
 // ---- The grid -----------------------------------------------------------------------
 
 /**
- * Builds the search grid between a and b ({lat, lon}) on 'mars' or 'moon'. Longitudes are
+ * Builds the search grid between a and b ({lat, lon}) on 'mars', 'moon' or 'earth'. Longitudes are
  * unwrapped so the box takes the short way round. Returns typed arrays, one value per cell.
- * (The Moon has no dust storms and no seasons: its storm values are all 0.)
+ * (The Moon has no dust storms and no seasons: its storm values are all 0. Earth: see earthRelief.)
  */
-export async function buildGrid(a, b, season, onProgress = () => {}, world = 'mars') {
+export async function buildGrid(a, b, season, onProgress = () => {}, world = 'mars', { minCellKm = 0 } = {}) {
   const R = RADIUS[world];
   let lonB = b.lon;
   if (lonB - a.lon > 180) lonB -= 360;
@@ -215,10 +229,13 @@ export async function buildGrid(a, b, season, onProgress = () => {}, world = 'ma
   const metas = index[world];
   // Cells: as fine as the slope data (~2.6 km per tile pixel at its top level), coarser
   // only when the box would hold too many cells.
-  const slopePxDeg = 180 / (256 * 2 ** metas.slope.max_zoom);
+  // (Earth's tiles are Web Mercator: square levels, pixels shrink towards the poles)
+  const merc = metas.slope.crs === 'EPSG3857';
+  const slopePxDeg = (merc ? 360 * cosMid : 180) / (256 * 2 ** metas.slope.max_zoom);
   const heightKm = rad(latMax - latMin) * R;
   const widthKm = rad(lonMax - lonMin) * R * cosMid;
-  let cellKm = Math.max(rad(slopePxDeg) * R, Math.sqrt((heightKm * widthKm) / MAX_CELLS));
+  // (minCellKm: to compare two worlds at the same cell size)
+  let cellKm = Math.max(rad(slopePxDeg) * R, Math.sqrt((heightKm * widthKm) / MAX_CELLS), minCellKm);
   const rows = Math.max(3, Math.ceil(heightKm / cellKm));
   const cols = Math.max(3, Math.ceil(widthKm / cellKm));
   cellKm = heightKm / rows;
@@ -227,8 +244,11 @@ export async function buildGrid(a, b, season, onProgress = () => {}, world = 'ma
 
   onProgress('Reading NASA terrain data…');
   const box = [latMin, latMax, lonMin, lonMax];
+  // Earth has no relief, thermal-inertia, crater or dust-storm data: those stay empty (NaN / 0)
+  // and the planner says so; Earth's relief is worked out below from its elevation.
+  const none = { at: () => NaN, smooth: () => NaN };
   const [slope, elev, relief, surface, tmin, storm] = await Promise.all([
-    ...['slope', 'elevation', 'relief', 'surface', 'temp_min'].map((k) => layerSampler(k, metas[k], ...box, undefined, world)),
+    ...['slope', 'elevation', 'relief', 'surface', 'temp_min'].map((k) => (metas[k] ? layerSampler(k, metas[k], ...box, undefined, world) : none)),
     world === 'mars' ? stormGrid(season) : () => 0,
   ]);
 
@@ -280,11 +300,40 @@ export async function buildGrid(a, b, season, onProgress = () => {}, world = 'ma
     }
   }
 
-  onProgress('Mapping craters…');
-  const craters = await cratersIn(latMin, latMax, lonMin, lonMax, world);
+  if (world === 'earth') earthRelief(g);
+
+  onProgress(world === 'earth' ? 'Measuring the terrain…' : 'Mapping craters…');
+  const craters = world === 'earth' ? [] : await cratersIn(latMin, latMax, lonMin, lonMax, world);
   markCraters(g, craters);
   g.craters = craters;
   return g;
+}
+
+/**
+ * Earth's terrain roughness, the same measure as the Moon / Mars relief maps: the standard
+ * deviation of elevation inside ~9.3 km blocks (5 x 5 pixels of ~1.9 km there). Here: the cells'
+ * mean elevations (each ~2.5 km, from ETOPO 2022) in a block of cells ~9.3 km wide around each
+ * cell. The tiles store Earth's height in ~34 m steps; averaging several pixels per cell keeps
+ * that rounding mostly below 20 m, where the planner counts ground as smooth anyway.
+ */
+function earthRelief(g) {
+  const half = Math.max(1, Math.round((9.3 / g.cellKm - 1) / 2)); // block of (2 half + 1) cells, closest to 9.3 km
+  const { rows, cols, elev, valid } = g;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const i = r * cols + c;
+      if (!valid[i]) { g.relief[i] = NaN; continue; }
+      let s = 0; let s2 = 0; let k = 0;
+      for (let y = Math.max(0, r - half); y <= Math.min(rows - 1, r + half); y++) {
+        for (let x = Math.max(0, c - half); x <= Math.min(cols - 1, c + half); x++) {
+          const j = y * cols + x;
+          if (!valid[j]) continue;
+          s += elev[j]; s2 += elev[j] * elev[j]; k++;
+        }
+      }
+      g.relief[i] = k > 1 ? Math.sqrt(Math.max(0, s2 / k - (s / k) ** 2)) : NaN;
+    }
+  }
 }
 
 /**
