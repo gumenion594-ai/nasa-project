@@ -403,8 +403,6 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
   // ---- Views (coloured overlays)
   map.createPane('overlay').style.zIndex = 350; // above the imagery, below the selection
   let overlay = null;
-  const legend = L.control({ position: 'bottomleft' });
-  legend.onAdd = () => L.DomUtil.create('div', 'legend');
 
   // ---- Map settings panel (bottom left): landmarks on/off
   const settings = L.control({ position: 'bottomleft' });
@@ -462,12 +460,18 @@ function setUpSelection(key, body, params, { analog = false } = {}) {
       row.classList.toggle('active', Object.keys(VIEWS).filter((v) => available[v])[i] === view);
     });
     if (overlay) { overlay.remove(); overlay = null; }
-    legend.remove();
-    if (!view) return;
+    const legend = $('view-legend');
+    if (!view) {
+      legend.hidden = true;
+      legend.open = false;
+      return;
+    }
     const meta = available[view];
     overlay = createOverlay(key, view, meta, 'overlay', proj).addTo(map);
-    legend.addTo(map);
-    legend.getContainer().innerHTML = legendHtml(view, meta);
+    legend.hidden = false;
+    legend.open = true;
+    legend.querySelector('summary').textContent = `Colour legend: ${VIEWS[view].name}`;
+    $('view-legend-content').innerHTML = legendHtml(view, meta);
   }
 
   // ---- Area summary: typical value of every characteristic over the circle
@@ -903,7 +907,7 @@ function freeScreenPadding(gap = 24) {
     if (left) pl = Math.max(pl, left.right + gap);
     if (summary) pr = Math.max(pr, W - summary.left + gap);
     if (selectPanel) pr = Math.max(pr, W - selectPanel.left + gap);
-    // bottom-left map controls (legend, landmarks switch, zoom readout)
+    // bottom-left map controls (landmarks switch, zoom readout)
     const controls = document.querySelector('#map-view .leaflet-bottom.leaflet-left')?.getBoundingClientRect();
     if (controls && controls.width > 0) pl = Math.max(pl, controls.right + gap);
   } else {

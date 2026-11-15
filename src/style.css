@@ -96,6 +96,10 @@ html, body { margin: 0; height: 100%; background: #000; color: #eee;
 /* keep the radio button for keyboard and screen readers, but hide it visually */
 .view-chip input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
 .view-about { margin: .55rem 0 0 !important; min-height: 2.6em; color: #9a9aa2; font-size: .76rem; line-height: 1.4; }
+.view-legend { margin-top: .55rem; }
+.view-legend summary { color: #ddd; cursor: pointer; font-size: .78rem; }
+.view-legend summary:focus-visible { outline: 2px solid #7fd4ff; outline-offset: 2px; }
+.view-legend .legend { width: auto; margin-top: .4rem; }
 
 /* ---- Legend for the active view ---- */
 .legend { width: 260px; padding: .55rem .7rem .5rem; background: rgba(0,0,0,.78); color: #fff;
